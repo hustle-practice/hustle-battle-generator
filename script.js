@@ -70,6 +70,11 @@ let lastRoundData = null;
 let openParticipantMenuId = null;
 let editingParticipantId = null;
 
+
+/* ========================================
+   Firebase
+======================================== */
+
 function updateFirebaseStatus(status, detail = "") {
   firebaseStatus.textContent = status;
   firebaseUserInfo.textContent = detail;
@@ -110,6 +115,7 @@ function initializeFirebaseConnection() {
 
           try {
             await firebaseAuth.signInAnonymously();
+
           } catch (error) {
             console.error(error);
 
@@ -173,7 +179,10 @@ async function checkCurrentUserRole(user) {
     isCurrentUserAdmin =
       snapshot.exists &&
       snapshot.data() &&
-      snapshot.data().role === "admin";
+      (
+        snapshot.data().role === "admin" ||
+        snapshot.data().role === "owner"
+      );
 
     if (isCurrentUserAdmin) {
       updateFirebaseStatus(
@@ -258,6 +267,7 @@ async function exitAdminMode() {
 
   try {
     await firebaseAuth.signOut();
+
   } catch (error) {
     console.error(error);
   }
@@ -323,6 +333,11 @@ function updateRegistrationDisplay() {
   }
 }
 
+
+/* ========================================
+   Firestore Listener
+======================================== */
+
 function startParticipantsListener() {
   if (!firebaseDb || !currentFirebaseUser) {
     return;
@@ -357,6 +372,7 @@ function startParticipantsListener() {
             function (doc) {
               const remote = doc.data();
               const id = doc.id;
+
               const stats =
                 participantStats[id] || {};
 
@@ -388,16 +404,34 @@ function startParticipantsListener() {
                   remote.active !== false,
 
                 danceCount:
-                  getNumberOrZero(stats.danceCount),
+                  getNumberOrZero(
+                    stats.danceCount
+                  ),
 
                 judgeCount:
-                  getNumberOrZero(stats.judgeCount),
+                  getNumberOrZero(
+                    stats.judgeCount
+                  ),
+
+                timekeeperCount:
+                  getNumberOrZero(
+                    stats.timekeeperCount
+                  ),
 
                 danceFairCount:
-                  getNumberOrZero(stats.danceFairCount),
+                  getNumberOrZero(
+                    stats.danceFairCount
+                  ),
 
                 judgeFairCount:
-                  getNumberOrZero(stats.judgeFairCount)
+                  getNumberOrZero(
+                    stats.judgeFairCount
+                  ),
+
+                timekeeperFairCount:
+                  getNumberOrZero(
+                    stats.timekeeperFairCount
+                  )
               });
             }
           );
@@ -554,6 +588,11 @@ function stopRealtimeListeners() {
     eventStateUnsubscribe = null;
   }
 }
+
+
+/* ========================================
+   参加登録
+======================================== */
 
 async function addParticipant() {
   if (!currentFirebaseUser || !firebaseDb) {
@@ -775,6 +814,11 @@ function isCurrentParticipant(
     currentFirebaseUser.uid
   );
 }
+
+
+/* ========================================
+   参加者管理
+======================================== */
 
 async function deleteParticipant(id) {
   if (!isCurrentUserAdmin) {
@@ -1194,6 +1238,11 @@ async function saveParticipantEdit() {
   }
 }
 
+
+/* ========================================
+   Event State
+======================================== */
+
 async function saveEventState() {
   if (
     !isCurrentUserAdmin ||
@@ -1234,6 +1283,11 @@ async function saveEventState() {
   }
 }
 
+
+/* ========================================
+   Fair Count
+======================================== */
+
 function initializeMissingParticipantStats() {
   let changed = false;
 
@@ -1242,28 +1296,55 @@ function initializeMissingParticipantStats() {
       const id =
         String(participant.id);
 
-      if (participantStats[id]) {
+      if (!participantStats[id]) {
+        participantStats[id] = {
+          danceCount: 0,
+          judgeCount: 0,
+          timekeeperCount: 0,
+
+          danceFairCount:
+            getParticipationType(
+              participant
+            ) === "dance"
+              ? getCurrentDanceFairBaseline(id)
+              : 0,
+
+          judgeFairCount:
+            participant.judgeAvailable
+              ? getCurrentJudgeFairBaseline(id)
+              : 0,
+
+          timekeeperFairCount:
+            getCurrentTimekeeperFairBaseline(id)
+        };
+
+        changed = true;
         return;
       }
 
-      participantStats[id] = {
-        danceCount: 0,
-        judgeCount: 0,
+      /*
+        v34以前から存在する参加者には
+        Timekeeper項目がないので補完する。
+      */
+      if (
+        typeof participantStats[id]
+          .timekeeperCount !== "number"
+      ) {
+        participantStats[id]
+          .timekeeperCount = 0;
 
-        danceFairCount:
-          getParticipationType(
-            participant
-          ) === "dance"
-            ? getCurrentDanceFairBaseline(id)
-            : 0,
+        changed = true;
+      }
 
-        judgeFairCount:
-          participant.judgeAvailable
-            ? getCurrentJudgeFairBaseline(id)
-            : 0
-      };
+      if (
+        typeof participantStats[id]
+          .timekeeperFairCount !== "number"
+      ) {
+        participantStats[id]
+          .timekeeperFairCount = 0;
 
-      changed = true;
+        changed = true;
+      }
     }
   );
 
@@ -1317,6 +1398,12 @@ function adjustResumedParticipants(
             );
         }
 
+        participantStats[id]
+          .timekeeperFairCount =
+          getCurrentTimekeeperFairBaseline(
+            id
+          );
+
         changed = true;
       }
     }
@@ -1343,6 +1430,11 @@ function applyStatsToParticipants() {
           stats.judgeCount
         );
 
+      participant.timekeeperCount =
+        getNumberOrZero(
+          stats.timekeeperCount
+        );
+
       participant.danceFairCount =
         getNumberOrZero(
           stats.danceFairCount
@@ -1351,6 +1443,11 @@ function applyStatsToParticipants() {
       participant.judgeFairCount =
         getNumberOrZero(
           stats.judgeFairCount
+        );
+
+      participant.timekeeperFairCount =
+        getNumberOrZero(
+          stats.timekeeperFairCount
         );
     }
   );
@@ -1378,6 +1475,11 @@ function syncStatsFromParticipants() {
             participant.judgeCount
           ),
 
+        timekeeperCount:
+          getNumberOrZero(
+            participant.timekeeperCount
+          ),
+
         danceFairCount:
           getNumberOrZero(
             participant.danceFairCount
@@ -1386,6 +1488,11 @@ function syncStatsFromParticipants() {
         judgeFairCount:
           getNumberOrZero(
             participant.judgeFairCount
+          ),
+
+        timekeeperFairCount:
+          getNumberOrZero(
+            participant.timekeeperFairCount
           )
       };
     }
@@ -1474,17 +1581,59 @@ function getCurrentJudgeFairBaseline(
   return total / targets.length;
 }
 
+function getCurrentTimekeeperFairBaseline(
+  excludeId = null
+) {
+  const targets =
+    participants.filter(
+      function (participant) {
+        return (
+          participant.active !== false &&
+          String(participant.id) !==
+          String(excludeId)
+        );
+      }
+    );
+
+  if (targets.length === 0) {
+    return 0;
+  }
+
+  const total =
+    targets.reduce(
+      function (sum, participant) {
+        return (
+          sum +
+          getTimekeeperFairCount(
+            participant
+          )
+        );
+      },
+      0
+    );
+
+  return total / targets.length;
+}
+
+
+/* ========================================
+   Round生成
+======================================== */
+
 async function generateRound() {
   if (!isCurrentUserAdmin) {
     return;
   }
 
-  /*
-    前Roundの最終BattleでDanceまたはJudgeを担当した人。
-    次RoundのBattle 1では、できる限りDanceにもJudgeにも配置しない。
-  */
   const previousFinalBattleParticipantIds =
     getPreviousFinalBattleParticipantIds();
+
+  /*
+    v34:
+    直前Roundで使用したPairを取得。
+  */
+  const previousRoundPairKeys =
+    getPreviousRoundPairKeys();
 
   const activeDanceParticipants =
     participants.filter(
@@ -1511,10 +1660,7 @@ async function generateRound() {
     sortByDanceCount(
       activeDanceParticipants.filter(
         function (participant) {
-          return (
-            participant.role ===
-            "leader"
-          );
+          return participant.role === "leader";
         }
       )
     );
@@ -1523,10 +1669,7 @@ async function generateRound() {
     sortByDanceCount(
       activeDanceParticipants.filter(
         function (participant) {
-          return (
-            participant.role ===
-            "follower"
-          );
+          return participant.role === "follower";
         }
       )
     );
@@ -1535,10 +1678,7 @@ async function generateRound() {
     sortByDanceCount(
       activeDanceParticipants.filter(
         function (participant) {
-          return (
-            participant.role ===
-            "both"
-          );
+          return participant.role === "both";
         }
       )
     );
@@ -1592,10 +1732,6 @@ async function generateRound() {
     return;
   }
 
-  /*
-    誰がこのRoundにDance出場するかは従来どおり
-    danceFairCountで決める。
-  */
   const selectedLeaders =
     sortByDanceCount(
       leaders
@@ -1612,19 +1748,24 @@ async function generateRound() {
       usablePairCount
     );
 
-  /*
-    v31:
-    まず従来どおりPairとBattleを公平性優先で作る。
-    そのBattle順の入れ替えだけでRound境界の連続を0人にできるなら、
-    Pair構成は一切変更しない。
 
-    順番変更だけでは連続を0人にできない場合に限り、
-    Battle 1の4人・Pair構成を再検討する。
+  /*
+    v34 Pair生成
+
+    優先順位：
+    1. 直前Roundと同じPairを避ける
+    2. 過去のPair回数が少ない
+    3. 同条件ならランダム
+
+    Pair全体を一括評価するため、
+    一部だけ良くて最後の人が同じPairになる状況も
+    起こりにくくしている。
   */
   const standardPairs =
     createFairPairs(
       selectedLeaders,
-      selectedFollowers
+      selectedFollowers,
+      previousRoundPairKeys
     );
 
   let battles =
@@ -1632,20 +1773,33 @@ async function generateRound() {
       standardPairs
     );
 
+
+  /*
+    v31から継続：
+    Pair構成を変えなくてもBattle順変更だけで
+    Round境界の連続を避けられるなら、
+    Battle順だけ変更する。
+  */
   const couldAvoidByReordering =
     moveZeroOverlapBattleToFront(
       battles,
       previousFinalBattleParticipantIds
     );
 
+  /*
+    Battle順だけでは回避できない場合のみ、
+    Battle 1の構成を再検討する。
+  */
   if (!couldAvoidByReordering) {
     battles =
       createRoundBattlesWithProtectedFirstBattle(
         selectedLeaders,
         selectedFollowers,
-        previousFinalBattleParticipantIds
+        previousFinalBattleParticipantIds,
+        previousRoundPairKeys
       );
   }
+
 
   const usedIds =
     new Set();
@@ -1666,6 +1820,7 @@ async function generateRound() {
           );
 
           pair.leader.danceCount++;
+
           pair.follower.danceCount++;
 
           pair.leader.danceFairCount =
@@ -1699,19 +1854,53 @@ async function generateRound() {
     }
   );
 
+
+  /*
+    v34 Judge選定
+
+    Battle 1：
+    前Round最終Battle担当者を可能な限り避ける。
+
+    Battle 2以降：
+    このRoundですでにJudgeをした人を
+    可能な限り避ける。
+  */
+  const roundJudgeUsedIds =
+    new Set();
+
   battles.forEach(
     function (
       battle,
       battleIndex
     ) {
+      const avoidIds =
+        new Set();
+
+      if (battleIndex === 0) {
+        previousFinalBattleParticipantIds
+          .forEach(
+            function (id) {
+              avoidIds.add(
+                String(id)
+              );
+            }
+          );
+      }
+
+      roundJudgeUsedIds
+        .forEach(
+          function (id) {
+            avoidIds.add(
+              String(id)
+            );
+          }
+        );
+
       battle.judges =
         selectJudgesForBattle(
           battle,
           3,
-
-          battleIndex === 0
-            ? previousFinalBattleParticipantIds
-            : new Set()
+          avoidIds
         );
 
       battle.judges.forEach(
@@ -1722,10 +1911,69 @@ async function generateRound() {
             getJudgeFairCount(
               judge
             ) + 1;
+
+          roundJudgeUsedIds.add(
+            String(judge.id)
+          );
         }
       );
     }
   );
+
+
+  /*
+    v34 Timekeeper
+
+    各Battle 1人。
+
+    優先順位：
+    1. このRoundでDanceに出ていない人
+       かつ現在のBattleでJudgeではない人
+    2. いなければ現在のBattleのJudge
+
+    同じRoundで同一Timekeeperが続くのも
+    可能な限り避ける。
+  */
+  const roundDancerIds =
+    new Set(
+      Array.from(
+        usedIds
+      ).map(String)
+    );
+
+  const roundTimekeeperUsedIds =
+    new Set();
+
+  battles.forEach(
+    function (battle) {
+      const timekeeper =
+        selectTimekeeperForBattle(
+          battle,
+          roundDancerIds,
+          roundTimekeeperUsedIds
+        );
+
+      battle.timekeeper =
+        timekeeper;
+
+      if (timekeeper) {
+        timekeeper.timekeeperCount =
+          getNumberOrZero(
+            timekeeper.timekeeperCount
+          ) + 1;
+
+        timekeeper.timekeeperFairCount =
+          getTimekeeperFairCount(
+            timekeeper
+          ) + 1;
+
+        roundTimekeeperUsedIds.add(
+          String(timekeeper.id)
+        );
+      }
+    }
+  );
+
 
   const waitingParticipants =
     activeDanceParticipants.filter(
@@ -1754,10 +2002,11 @@ async function generateRound() {
   renderAll();
 }
 
-/*
-  前Round最終Battleで
-  DanceまたはJudgeを担当した人を取得。
-*/
+
+/* ========================================
+   前Round情報
+======================================== */
+
 function getPreviousFinalBattleParticipantIds() {
   const result =
     new Set();
@@ -1781,6 +2030,10 @@ function getPreviousFinalBattleParticipantIds() {
     return result;
   }
 
+  /*
+    Timekeeperは身体的な連戦負荷が小さいため、
+    Round境界回避対象には含めない。
+  */
   const ids = [
     finalBattle.pairA &&
       finalBattle.pairA.leaderId,
@@ -1816,13 +2069,62 @@ function getPreviousFinalBattleParticipantIds() {
   return result;
 }
 
-/*
-  v31 第1段階:
-  従来どおり作ったBattleの中に、前Round最終Battleとの
-  Dance重複が0人のBattleがあれば、そのBattleを先頭へ移す。
 
-  ここで成功した場合、Pair構成は一切変更しない。
+/*
+  v34：
+  直前Roundで実際に組んだPair一覧。
 */
+function getPreviousRoundPairKeys() {
+  const keys =
+    new Set();
+
+  if (
+    !lastRoundData ||
+    !Array.isArray(
+      lastRoundData.battles
+    )
+  ) {
+    return keys;
+  }
+
+  lastRoundData.battles.forEach(
+    function (battle) {
+      if (
+        battle.pairA &&
+        battle.pairA.leaderId != null &&
+        battle.pairA.followerId != null
+      ) {
+        keys.add(
+          getHistoryKeyFromIds(
+            battle.pairA.leaderId,
+            battle.pairA.followerId
+          )
+        );
+      }
+
+      if (
+        battle.pairB &&
+        battle.pairB.leaderId != null &&
+        battle.pairB.followerId != null
+      ) {
+        keys.add(
+          getHistoryKeyFromIds(
+            battle.pairB.leaderId,
+            battle.pairB.followerId
+          )
+        );
+      }
+    }
+  );
+
+  return keys;
+}
+
+
+/* ========================================
+   Round境界
+======================================== */
+
 function moveZeroOverlapBattleToFront(
   battles,
   avoidIds
@@ -1911,17 +2213,16 @@ function getBattleDanceOverlapCount(
   );
 }
 
-/*
-  v31 第2段階:
-  Battle順の変更だけではRound境界の連続を0人にできなかった場合のみ使用。
 
-  今Roundに出場する人自体は変更せず、Battle 1の4人・Pair構成を再検討する。
-  連続人数を最優先で最小化し、その条件内でPair履歴と対戦履歴を評価する。
-*/
+/* ========================================
+   Battle 1 再構成
+======================================== */
+
 function createRoundBattlesWithProtectedFirstBattle(
   selectedLeaders,
   selectedFollowers,
-  avoidIds
+  avoidIds,
+  previousRoundPairKeys = new Set()
 ) {
   const battles = [];
 
@@ -1936,7 +2237,8 @@ function createRoundBattlesWithProtectedFirstBattle(
     selectProtectedFirstBattle(
       selectedLeaders,
       selectedFollowers,
-      avoidIds
+      avoidIds,
+      previousRoundPairKeys
     );
 
   if (!firstBattle) {
@@ -1946,7 +2248,8 @@ function createRoundBattlesWithProtectedFirstBattle(
   battles.push({
     pairA: firstBattle.pairA,
     pairB: firstBattle.pairB,
-    judges: []
+    judges: [],
+    timekeeper: null
   });
 
   const firstBattleLeaderIds =
@@ -1990,7 +2293,8 @@ function createRoundBattlesWithProtectedFirstBattle(
     const remainingPairs =
       createFairPairs(
         remainingLeaders,
-        remainingFollowers
+        remainingFollowers,
+        previousRoundPairKeys
       );
 
     const remainingBattles =
@@ -2009,7 +2313,8 @@ function createRoundBattlesWithProtectedFirstBattle(
 function selectProtectedFirstBattle(
   leaders,
   followers,
-  avoidIds
+  avoidIds,
+  previousRoundPairKeys = new Set()
 ) {
   let bestScore = null;
   let bestCandidates = [];
@@ -2052,16 +2357,19 @@ function selectProtectedFirstBattle(
                 leader: leaderA,
                 follower: followerA
               },
+
               pairB: {
                 leader: leaderB,
                 follower: followerB
               }
             },
+
             {
               pairA: {
                 leader: leaderA,
                 follower: followerB
               },
+
               pairB: {
                 leader: leaderB,
                 follower: followerA
@@ -2074,7 +2382,8 @@ function selectProtectedFirstBattle(
               const score =
                 getProtectedFirstBattleScore(
                   arrangement,
-                  avoidIds
+                  avoidIds,
+                  previousRoundPairKeys
                 );
 
               if (
@@ -2085,6 +2394,7 @@ function selectProtectedFirstBattle(
                 ) < 0
               ) {
                 bestScore = score;
+
                 bestCandidates = [
                   arrangement
                 ];
@@ -2117,7 +2427,8 @@ function selectProtectedFirstBattle(
 
 function getProtectedFirstBattleScore(
   battle,
-  avoidIds
+  avoidIds,
+  previousRoundPairKeys = new Set()
 ) {
   const people = [
     battle.pairA.leader,
@@ -2147,6 +2458,29 @@ function getProtectedFirstBattleScore(
       0
     );
 
+  const consecutivePairPenalty =
+    (
+      previousRoundPairKeys.has(
+        getHistoryKey(
+          battle.pairA.leader,
+          battle.pairA.follower
+        )
+      )
+        ? 1
+        : 0
+    )
+    +
+    (
+      previousRoundPairKeys.has(
+        getHistoryKey(
+          battle.pairB.leader,
+          battle.pairB.follower
+        )
+      )
+        ? 1
+        : 0
+    );
+
   const pairHistoryPenalty =
     getPairHistoryCount(
       battle.pairA.leader,
@@ -2167,8 +2501,13 @@ function getProtectedFirstBattleScore(
   return {
     continuityPenalty:
       continuityPenalty,
+
+    consecutivePairPenalty:
+      consecutivePairPenalty,
+
     pairHistoryPenalty:
       pairHistoryPenalty,
+
     opponentHistoryPenalty:
       opponentHistoryPenalty
   };
@@ -2178,6 +2517,10 @@ function compareProtectedFirstBattleScores(
   a,
   b
 ) {
+  /*
+    最優先：
+    前Round最終Battle → 次Round Battle 1の連続。
+  */
   if (
     a.continuityPenalty !==
     b.continuityPenalty
@@ -2185,6 +2528,20 @@ function compareProtectedFirstBattleScores(
     return (
       a.continuityPenalty -
       b.continuityPenalty
+    );
+  }
+
+  /*
+    次に：
+    直前Roundと同じPairを避ける。
+  */
+  if (
+    a.consecutivePairPenalty !==
+    b.consecutivePairPenalty
+  ) {
+    return (
+      a.consecutivePairPenalty -
+      b.consecutivePairPenalty
     );
   }
 
@@ -2204,86 +2561,322 @@ function compareProtectedFirstBattleScores(
   );
 }
 
+
+/* ========================================
+   Pair生成
+======================================== */
+
+/*
+  v34：
+  Pair全体を同時に評価する最小コスト割当。
+
+  これまでのLeaderごとのGreedy選択よりも、
+  Round全体として
+  「直前Roundと同じPair」
+  が発生しにくい。
+
+  優先順位：
+  1. 直前Roundと同じPairの数
+  2. Pair履歴合計
+  3. ランダム
+*/
 function createFairPairs(
   leaders,
-  followers
+  followers,
+  previousRoundPairKeys = new Set()
 ) {
-  const pairs = [];
+  const pairCount =
+    Math.min(
+      leaders.length,
+      followers.length
+    );
 
-  const availableFollowers =
-    [...followers];
+  if (pairCount === 0) {
+    return [];
+  }
 
   const orderedLeaders =
-    sortByDanceCount(
-      leaders
+    [...leaders].slice(
+      0,
+      pairCount
     );
+
+  const orderedFollowers =
+    shuffleArray(
+      [...followers]
+    ).slice(
+      0,
+      pairCount
+    );
+
+  let maximumHistory = 0;
 
   orderedLeaders.forEach(
     function (leader) {
-      let minimumHistory =
-        Infinity;
-
-      let candidates = [];
-
-      availableFollowers.forEach(
+      orderedFollowers.forEach(
         function (follower) {
-          const count =
-            getPairHistoryCount(
-              leader,
-              follower
+          maximumHistory =
+            Math.max(
+              maximumHistory,
+              getPairHistoryCount(
+                leader,
+                follower
+              )
             );
-
-          if (
-            count <
-            minimumHistory
-          ) {
-            minimumHistory =
-              count;
-
-            candidates =
-              [follower];
-
-          } else if (
-            count ===
-            minimumHistory
-          ) {
-            candidates.push(
-              follower
-            );
-          }
         }
-      );
-
-      const selectedFollower =
-        getRandomItem(
-          candidates
-        );
-
-      pairs.push({
-        leader: leader,
-        follower: selectedFollower
-      });
-
-      const index =
-        availableFollowers
-          .findIndex(
-            function (follower) {
-              return (
-                follower.id ===
-                selectedFollower.id
-              );
-            }
-          );
-
-      availableFollowers.splice(
-        index,
-        1
       );
     }
   );
 
-  return pairs;
+  /*
+    1つの直前Round重複が、
+    Pair履歴全体の差より必ず大きくなるようにする。
+  */
+  const consecutiveWeight =
+    (
+      pairCount *
+      (maximumHistory + 1)
+    ) + 1;
+
+  const costMatrix =
+    orderedLeaders.map(
+      function (leader) {
+        return orderedFollowers.map(
+          function (follower) {
+            const key =
+              getHistoryKey(
+                leader,
+                follower
+              );
+
+            const consecutivePenalty =
+              previousRoundPairKeys.has(
+                key
+              )
+                ? 1
+                : 0;
+
+            const historyPenalty =
+              getPairHistoryCount(
+                leader,
+                follower
+              );
+
+            /*
+              ごく小さなランダム値で
+              完全同点だけランダム化。
+            */
+            const randomTie =
+              Math.random() *
+              0.000001;
+
+            return (
+              consecutivePenalty *
+              consecutiveWeight
+              +
+              historyPenalty
+              +
+              randomTie
+            );
+          }
+        );
+      }
+    );
+
+  const assignment =
+    solveMinimumCostAssignment(
+      costMatrix
+    );
+
+  return orderedLeaders.map(
+    function (
+      leader,
+      leaderIndex
+    ) {
+      return {
+        leader: leader,
+
+        follower:
+          orderedFollowers[
+            assignment[leaderIndex]
+          ]
+      };
+    }
+  );
 }
+
+
+/*
+  Hungarian Algorithm
+  最小コストの1対1割当。
+*/
+function solveMinimumCostAssignment(
+  costMatrix
+) {
+  const n =
+    costMatrix.length;
+
+  if (n === 0) {
+    return [];
+  }
+
+  const m =
+    costMatrix[0].length;
+
+  const u =
+    new Array(n + 1)
+      .fill(0);
+
+  const v =
+    new Array(m + 1)
+      .fill(0);
+
+  const p =
+    new Array(m + 1)
+      .fill(0);
+
+  const way =
+    new Array(m + 1)
+      .fill(0);
+
+  for (
+    let i = 1;
+    i <= n;
+    i++
+  ) {
+    p[0] = i;
+
+    let j0 = 0;
+
+    const minv =
+      new Array(m + 1)
+        .fill(Infinity);
+
+    const used =
+      new Array(m + 1)
+        .fill(false);
+
+    do {
+      used[j0] = true;
+
+      const i0 =
+        p[j0];
+
+      let delta =
+        Infinity;
+
+      let j1 = 0;
+
+      for (
+        let j = 1;
+        j <= m;
+        j++
+      ) {
+        if (used[j]) {
+          continue;
+        }
+
+        const currentCost =
+          costMatrix[
+            i0 - 1
+          ][
+            j - 1
+          ]
+          -
+          u[i0]
+          -
+          v[j];
+
+        if (
+          currentCost <
+          minv[j]
+        ) {
+          minv[j] =
+            currentCost;
+
+          way[j] =
+            j0;
+        }
+
+        if (
+          minv[j] <
+          delta
+        ) {
+          delta =
+            minv[j];
+
+          j1 = j;
+        }
+      }
+
+      for (
+        let j = 0;
+        j <= m;
+        j++
+      ) {
+        if (used[j]) {
+          u[
+            p[j]
+          ] += delta;
+
+          v[j] -=
+            delta;
+
+        } else {
+          minv[j] -=
+            delta;
+        }
+      }
+
+      j0 =
+        j1;
+
+    } while (
+      p[j0] !== 0
+    );
+
+    do {
+      const j1 =
+        way[j0];
+
+      p[j0] =
+        p[j1];
+
+      j0 =
+        j1;
+
+    } while (
+      j0 !== 0
+    );
+  }
+
+  const assignment =
+    new Array(n)
+      .fill(-1);
+
+  for (
+    let j = 1;
+    j <= m;
+    j++
+  ) {
+    if (
+      p[j] > 0 &&
+      p[j] <= n
+    ) {
+      assignment[
+        p[j] - 1
+      ] =
+        j - 1;
+    }
+  }
+
+  return assignment;
+}
+
+
+/* ========================================
+   Battle生成
+======================================== */
 
 function createFairBattles(pairs) {
   const battles = [];
@@ -2341,7 +2934,8 @@ function createFairBattles(pairs) {
     battles.push({
       pairA: pairA,
       pairB: pairB,
-      judges: []
+      judges: [],
+      timekeeper: null
     });
 
     availablePairs.splice(
@@ -2374,6 +2968,11 @@ function getBattleOpponentScore(
   );
 }
 
+
+/* ========================================
+   Judge
+======================================== */
+
 function selectJudgesForBattle(
   battle,
   requestedCount,
@@ -2381,10 +2980,21 @@ function selectJudgesForBattle(
 ) {
   const dancerIds =
     new Set([
-      battle.pairA.leader.id,
-      battle.pairA.follower.id,
-      battle.pairB.leader.id,
-      battle.pairB.follower.id
+      String(
+        battle.pairA.leader.id
+      ),
+
+      String(
+        battle.pairA.follower.id
+      ),
+
+      String(
+        battle.pairB.leader.id
+      ),
+
+      String(
+        battle.pairB.follower.id
+      )
     ]);
 
   const allCandidates =
@@ -2394,7 +3004,7 @@ function selectJudgesForBattle(
           participant.active !== false &&
           participant.judgeAvailable &&
           !dancerIds.has(
-            participant.id
+            String(participant.id)
           )
         );
       }
@@ -2411,9 +3021,11 @@ function selectJudgesForBattle(
     );
 
   /*
-    Battle 1では、前Round最終Battle担当者以外だけで
-    Judge必要人数を確保できるなら、その人たちだけを候補にする。
-    不足する場合だけ連続担当者を候補へ戻す。
+    回避対象以外だけで必要人数が揃えば、
+    回避対象は候補から完全に外す。
+
+    v34ではBattle 2以降、
+    既にこのRoundでJudgeをした人もavoidIdsに入る。
   */
   const restedCandidates =
     allCandidates.filter(
@@ -2525,9 +3137,6 @@ function getJudgeCombinationScore(
       0
     );
 
-  /*
-    JudgeのみはRole構成上は中立扱い。
-  */
   const danceJudgeRoles =
     judges
       .filter(
@@ -2563,16 +3172,23 @@ function getJudgeCombinationScore(
   return {
     continuityPenalty:
       continuityPenalty,
-    maximumCount: maximumCount,
-    totalCount: totalCount,
-    rolePenalty: rolePenalty
+
+    maximumCount:
+      maximumCount,
+
+    totalCount:
+      totalCount,
+
+    rolePenalty:
+      rolePenalty
   };
 }
 
 function compareJudgeScores(a, b) {
   /*
-    Battle 1ではRound境界の連続回避を最優先。
-    連続条件が同じなら従来どおりJudge公平性を優先する。
+    v34：
+    Round境界または同一Round Judge重複を
+    最優先で避ける。
   */
   if (
     a.continuityPenalty !==
@@ -2609,6 +3225,149 @@ function compareJudgeScores(a, b) {
     b.rolePenalty
   );
 }
+
+
+/* ========================================
+   Timekeeper
+======================================== */
+
+function selectTimekeeperForBattle(
+  battle,
+  roundDancerIds,
+  usedTimekeeperIds = new Set()
+) {
+  const judgeIds =
+    new Set(
+      battle.judges.map(
+        function (judge) {
+          return String(
+            judge.id
+          );
+        }
+      )
+    );
+
+  /*
+    第1候補：
+    このRoundでDanceに出ていない人。
+
+    かつ現在のBattleでJudgeではない人。
+  */
+  const idleCandidates =
+    participants.filter(
+      function (participant) {
+        return (
+          participant.active !== false
+          &&
+          !roundDancerIds.has(
+            String(participant.id)
+          )
+          &&
+          !judgeIds.has(
+            String(participant.id)
+          )
+        );
+      }
+    );
+
+  if (idleCandidates.length > 0) {
+    return selectFairTimekeeperCandidate(
+      idleCandidates,
+      usedTimekeeperIds
+    );
+  }
+
+  /*
+    第2候補：
+    余っている人がいなければ
+    現在のBattleのJudgeから1人。
+  */
+  if (
+    battle.judges.length > 0
+  ) {
+    return selectFairTimekeeperCandidate(
+      battle.judges,
+      usedTimekeeperIds
+    );
+  }
+
+  return null;
+}
+
+function selectFairTimekeeperCandidate(
+  candidates,
+  usedTimekeeperIds
+) {
+  if (
+    !candidates ||
+    candidates.length === 0
+  ) {
+    return null;
+  }
+
+  /*
+    同じRoundでまだTimekeeperをしていない人が
+    いればそちらを優先。
+  */
+  const unusedCandidates =
+    candidates.filter(
+      function (participant) {
+        return (
+          !usedTimekeeperIds.has(
+            String(participant.id)
+          )
+        );
+      }
+    );
+
+  const pool =
+    unusedCandidates.length > 0
+      ? unusedCandidates
+      : candidates;
+
+  let minimumCount =
+    Infinity;
+
+  let bestCandidates =
+    [];
+
+  pool.forEach(
+    function (participant) {
+      const count =
+        getTimekeeperFairCount(
+          participant
+        );
+
+      if (
+        count <
+        minimumCount
+      ) {
+        minimumCount =
+          count;
+
+        bestCandidates =
+          [participant];
+
+      } else if (
+        count ===
+        minimumCount
+      ) {
+        bestCandidates.push(
+          participant
+        );
+      }
+    }
+  );
+
+  return getRandomItem(
+    bestCandidates
+  );
+}
+
+
+/* ========================================
+   Combination
+======================================== */
 
 function createCombinations(
   array,
@@ -2655,13 +3414,28 @@ function createCombinations(
   return result;
 }
 
-function getHistoryKey(a, b) {
+
+/* ========================================
+   History
+======================================== */
+
+function getHistoryKeyFromIds(
+  idA,
+  idB
+) {
   return [
-    String(a.id),
-    String(b.id)
+    String(idA),
+    String(idB)
   ]
     .sort()
     .join("|");
+}
+
+function getHistoryKey(a, b) {
+  return getHistoryKeyFromIds(
+    a.id,
+    b.id
+  );
 }
 
 function getPairHistoryCount(
@@ -2757,6 +3531,19 @@ function getJudgeFairCount(
   );
 }
 
+function getTimekeeperFairCount(
+  participant
+) {
+  return getNumberOrZero(
+    participant.timekeeperFairCount
+  );
+}
+
+
+/* ========================================
+   Serialize
+======================================== */
+
 function serializeRound(
   battles,
   waitingParticipants,
@@ -2790,7 +3577,12 @@ function serializeRound(
                 function (judge) {
                   return judge.id;
                 }
-              )
+              ),
+
+            timekeeperId:
+              battle.timekeeper
+                ? battle.timekeeper.id
+                : null
           };
         }
       ),
@@ -2804,6 +3596,11 @@ function serializeRound(
   };
 }
 
+
+/* ========================================
+   Reset
+======================================== */
+
 async function resetRoundData() {
   if (!isCurrentUserAdmin) {
     return;
@@ -2814,7 +3611,7 @@ async function resetRoundData() {
       "Roundデータをリセットしますか？\n\n" +
       "リセットされるもの：\n" +
       "・Round番号\n" +
-      "・Dance / Judge回数\n" +
+      "・Dance / Judge / Timekeeper回数\n" +
       "・Pair履歴\n" +
       "・対戦履歴\n\n" +
       "参加者の登録情報は残ります。"
@@ -2836,8 +3633,11 @@ async function resetRoundData() {
     function (participant) {
       participant.danceCount = 0;
       participant.judgeCount = 0;
+      participant.timekeeperCount = 0;
+
       participant.danceFairCount = 0;
       participant.judgeFairCount = 0;
+      participant.timekeeperFairCount = 0;
     }
   );
 
@@ -2847,6 +3647,11 @@ async function resetRoundData() {
 
   renderAll();
 }
+
+
+/* ========================================
+   Render
+======================================== */
 
 function renderAll() {
   applyStatsToParticipants();
@@ -3008,11 +3813,17 @@ function renderParticipantList() {
       count.className =
         "participant-count";
 
+      /*
+        v34：
+        Timekeeper回数も確認できるよう表示。
+      */
       count.textContent =
         "D" +
         participant.danceCount +
-        " / J" +
-        participant.judgeCount;
+        "/J" +
+        participant.judgeCount +
+        "/T" +
+        participant.timekeeperCount;
 
       const judge =
         document.createElement(
@@ -3173,8 +3984,8 @@ function renderParticipantList() {
 
         note.textContent =
           participant.active === false
-            ? "復帰するとBattle・Judgeの対象に戻ります。"
-            : "休憩中はBattle・Judgeの対象外になります。";
+            ? "復帰するとBattle・Judge・Timekeeperの対象に戻ります。"
+            : "休憩中はBattle・Judge・Timekeeperの対象外になります。";
 
         panel.appendChild(button);
         panel.appendChild(note);
@@ -3222,6 +4033,11 @@ function renderParticipantList() {
       ? "block"
       : "none";
 }
+
+
+/* ========================================
+   Pair履歴
+======================================== */
 
 function renderPairHistory() {
   pairHistoryList.innerHTML = "";
@@ -3311,6 +4127,11 @@ function renderPairHistory() {
     }
   );
 }
+
+
+/* ========================================
+   対戦履歴
+======================================== */
 
 function renderOpponentSummary() {
   renderOpponentRoleSummary(
@@ -3538,6 +4359,11 @@ function getParticipantsUsedAsRole(
   );
 }
 
+
+/* ========================================
+   個人Round表示
+======================================== */
+
 function renderPersonalRoundStatus() {
   if (
     !roundPersonalStatus ||
@@ -3567,6 +4393,7 @@ function renderPersonalRoundStatus() {
 
   const danceBattles = [];
   const judgeBattles = [];
+  const timekeeperBattles = [];
 
   lastRoundData.battles.forEach(
     function (
@@ -3603,6 +4430,17 @@ function renderPersonalRoundStatus() {
         )
       ) {
         judgeBattles.push(
+          battleNumber
+        );
+      }
+
+      if (
+        battle.timekeeperId != null &&
+        String(
+          battle.timekeeperId
+        ) === currentId
+      ) {
+        timekeeperBattles.push(
           battleNumber
         );
       }
@@ -3643,6 +4481,15 @@ function renderPersonalRoundStatus() {
     );
   }
 
+  if (
+    timekeeperBattles.length > 0
+  ) {
+    messages.push(
+      "Timekeeper：Battle " +
+      timekeeperBattles.join(" / ")
+    );
+  }
+
   roundPersonalStatus.textContent =
     messages.join("　");
 
@@ -3650,6 +4497,11 @@ function renderPersonalRoundStatus() {
     .classList
     .remove("hidden");
 }
+
+
+/* ========================================
+   Current Round
+======================================== */
 
 function renderCurrentRound() {
   if (!lastRoundData) {
@@ -3708,6 +4560,13 @@ function renderCurrentRound() {
           )
           .filter(Boolean);
 
+      const timekeeper =
+        stored.timekeeperId != null
+          ? findParticipantById(
+              stored.timekeeperId
+            )
+          : null;
+
       battles.push({
         pairA: {
           leader: aLeader,
@@ -3719,7 +4578,10 @@ function renderCurrentRound() {
           follower: bFollower
         },
 
-        judges: judges
+        judges: judges,
+
+        timekeeper:
+          timekeeper
       });
     }
   );
@@ -3802,6 +4664,13 @@ function renderRound(
           }
         );
 
+      const timekeeperId =
+        battle.timekeeper
+          ? String(
+              battle.timekeeper.id
+            )
+          : null;
+
       const isMyDance =
         currentId &&
         dancerIds.includes(
@@ -3814,9 +4683,15 @@ function renderRound(
           currentId
         );
 
+      const isMyTimekeeper =
+        currentId &&
+        timekeeperId ===
+        currentId;
+
       const isMyBattle =
         isMyDance ||
-        isMyJudge;
+        isMyJudge ||
+        isMyTimekeeper;
 
       const card =
         document.createElement(
@@ -3865,14 +4740,28 @@ function renderRound(
         badge.className =
           "my-battle-badge";
 
-        if (isMyDance) {
-          badge.textContent =
-            "YOUR BATTLE";
+        const labels = [];
 
-        } else {
-          badge.textContent =
-            "YOU JUDGE";
+        if (isMyDance) {
+          labels.push(
+            "YOUR BATTLE"
+          );
         }
+
+        if (isMyJudge) {
+          labels.push(
+            "YOU JUDGE"
+          );
+        }
+
+        if (isMyTimekeeper) {
+          labels.push(
+            "TIMEKEEP"
+          );
+        }
+
+        badge.textContent =
+          labels.join(" / ");
 
         titleRow.appendChild(
           badge
@@ -3915,6 +4804,12 @@ function renderRound(
       card.appendChild(
         createJudgeElement(
           battle.judges
+        )
+      );
+
+      card.appendChild(
+        createTimekeeperElement(
+          battle.timekeeper
         )
       );
 
@@ -3969,6 +4864,11 @@ function renderRound(
     );
   }
 }
+
+
+/* ========================================
+   Battle表示部品
+======================================== */
 
 function createPairElement(
   label,
@@ -4205,6 +5105,111 @@ function createJudgeElement(
   return box;
 }
 
+
+/*
+  v34：
+  既存のJudge表示用CSSを流用するため、
+  style.cssの変更は不要。
+*/
+function createTimekeeperElement(
+  timekeeper
+) {
+  const box =
+    document.createElement(
+      "div"
+    );
+
+  box.className =
+    "judge-box";
+
+  const title =
+    document.createElement(
+      "div"
+    );
+
+  title.className =
+    "judge-box-title";
+
+  title.textContent =
+    "Timekeeper";
+
+  box.appendChild(
+    title
+  );
+
+  if (!timekeeper) {
+    const warning =
+      document.createElement(
+        "div"
+      );
+
+    warning.className =
+      "judge-warning";
+
+    warning.textContent =
+      "Timekeeper候補がいません。";
+
+    box.appendChild(
+      warning
+    );
+
+    return box;
+  }
+
+  const list =
+    document.createElement(
+      "div"
+    );
+
+  list.className =
+    "judge-list";
+
+  const item =
+    document.createElement(
+      "div"
+    );
+
+  item.className =
+    "judge-person";
+
+  if (
+    isCurrentParticipant(
+      timekeeper
+    )
+  ) {
+    item.classList.add(
+      "my-judge"
+    );
+  }
+
+  const name =
+    document.createElement(
+      "span"
+    );
+
+  name.textContent =
+    timekeeper.name;
+
+  item.appendChild(
+    name
+  );
+
+  list.appendChild(
+    item
+  );
+
+  box.appendChild(
+    list
+  );
+
+  return box;
+}
+
+
+/* ========================================
+   Utility
+======================================== */
+
 function sortByDanceCount(
   array
 ) {
@@ -4273,6 +5278,13 @@ function shuffleArray(array) {
 }
 
 function getRandomItem(array) {
+  if (
+    !array ||
+    array.length === 0
+  ) {
+    return null;
+  }
+
   return array[
     Math.floor(
       Math.random() *
@@ -4325,6 +5337,11 @@ function getRoleLabel(role) {
 
   return "Both";
 }
+
+
+/* ========================================
+   Event Listener
+======================================== */
 
 addButton.addEventListener(
   "click",
@@ -4404,6 +5421,7 @@ adminLogoutButton.addEventListener(
   "click",
   exitAdminMode
 );
+
 
 updateRegistrationParticipationUI();
 
