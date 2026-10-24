@@ -1,30 +1,35 @@
 /* ========================================
    Hustle Battle Generator
-   Round Logic v37
+   Round Logic v38
 
-   改善点
+   v37からの変更点
 
-   1. Dance公平性を「選出前」ではなく
-      「Round終了後の回数差」で評価
+   1. Dance出場回数の公平性は維持
 
-   2. 公平性を維持できる候補の中で
-      未成立Pairを最大限優先
+   2. 同じ公平性の候補内では、
+      前Round最終Battle
+      → 次Round Battle1
+      の連続参加人数を最優先で最小化
 
-   3. 直前Roundと同じPairを強く回避
+   3. 0人重複が可能なら必ず0人を選択
 
-   4. Pair成立回数の少ない組み合わせを優先
+   4. Pair自体はRound境界対策のために
+      後から組み直さない
 
-   5. Pair決定後はRound境界対策のために
-      Pairを組み直さない
+   5. その後に
+      ・未成立Pair
+      ・直前Round同一Pair
+      ・Pair成立回数
+      を評価
 
-   6. TimekeeperはBattle単位で
-      Dance / Judge以外から優先選出
+   6. Judge / Timekeeperロジックは
+      v37の方針を維持
 ======================================== */
 
 
 /* ========================================
    script.jsのGenerate Roundを
-   v37へ差し替え
+   v38へ差し替え
 ======================================== */
 
 generateRoundButton.removeEventListener(
@@ -34,15 +39,15 @@ generateRoundButton.removeEventListener(
 
 generateRoundButton.addEventListener(
   "click",
-  generateRoundV37
+  generateRoundV38
 );
 
 
 /* ========================================
-   Round生成 v37
+   Round生成 v38
 ======================================== */
 
-async function generateRoundV37() {
+async function generateRoundV38() {
   if (!isCurrentUserAdmin) {
     return;
   }
@@ -176,12 +181,12 @@ async function generateRoundV37() {
 
 
   /*
-    1Battle = 2Pairなので
+    1Battle = 2Pair。
+
+    Battleを成立させるため、
     Pair数は偶数にする。
 
-    例：
-    Lead 7 / Follow 8
-
+    Lead7 / Follow8
     → 6Pair
     → 3Battle
   */
@@ -203,18 +208,24 @@ async function generateRoundV37() {
 
 
   /* =====================================
-     v37 Pair選定
+     v38 Pair選定
 
-     出場者選定とPair選定を
-     同時に比較する。
+     優先順位：
+
+     1. Dance出場回数の公平性
+     2. Round境界の連続参加人数
+     3. 未成立Pair
+     4. 直前Round同一Pair
+     5. Pair成立回数
   ====================================== */
 
   const optimizedResult =
-    createOptimizedPairsV37(
+    createOptimizedPairsV38(
       leaders,
       followers,
       usablePairCount,
-      previousRoundPairKeys
+      previousRoundPairKeys,
+      previousFinalBattleParticipantIds
     );
 
 
@@ -238,31 +249,30 @@ async function generateRoundV37() {
 
   /* =====================================
      Battle生成
+
+     v38では、
+     最初のBattleをPairの組み直しなしで
+     最適化する。
+
+     つまりPair構成自体は保持する。
   ====================================== */
 
   let battles =
-    createFairBattles(
-      optimizedPairs
+    createBattlesWithProtectedFirstV38(
+      optimizedPairs,
+      previousFinalBattleParticipantIds
     );
 
 
-  /*
-    v37：
+  if (
+    battles.length === 0
+  ) {
+    alert(
+      "Battleを正常に作成できませんでした。"
+    );
 
-    Pair最適化後はPairを組み直さない。
-
-    前Round最終Battleとの連続回避は
-    Battle順の変更だけで対応する。
-
-    0人重複が可能なら0人を最優先。
-    無理なら重複人数が最少のBattleを
-    Battle1へ移動する。
-  */
-
-  moveBestBattleToFrontV37(
-    battles,
-    previousFinalBattleParticipantIds
-  );
+    return;
+  }
 
 
   /* =====================================
@@ -337,6 +347,8 @@ async function generateRoundV37() {
   /* =====================================
      Judge選定
 
+     v37方針を維持。
+
      ・Battle1は前Round最終担当者を回避
      ・同一RoundでJudge済みの人を回避
   ====================================== */
@@ -356,9 +368,9 @@ async function generateRoundV37() {
 
 
       /*
-        Battle1だけ、
-        前Round最終Battle担当者を
-        可能な限り避ける。
+        Battle1：
+        前Round最終Battleの担当者を
+        可能な限りJudgeからも避ける。
       */
 
       if (
@@ -393,7 +405,7 @@ async function generateRoundV37() {
 
 
       battle.judges =
-        selectJudgesForBattleV37(
+        selectJudgesForBattleV38(
           battle,
           3,
           avoidIds
@@ -446,7 +458,7 @@ async function generateRoundV37() {
     function (battle) {
 
       const timekeeper =
-        selectTimekeeperForBattleV37(
+        selectTimekeeperForBattleV38(
           battle,
           roundTimekeeperUsedIds
         );
@@ -523,28 +535,24 @@ async function generateRoundV37() {
 
 
 /* ========================================
-   Pair最適化 v37
+   Pair最適化 v38
 
-   まずLeader / Followerについて
-   「今回出場する人」の全候補を作る。
+   Leader / Followerの
+   出場候補を全て比較。
 
-   各候補についてRound終了後の
-   Dance回数差を計算。
+   第2回条件：
+   Lead7人 → 6人選出 = 7通り
+   Follow8人 → 6人選出 = 28通り
 
-   その公平性が同等の候補同士で
-
-   ・未成立Pair数
-   ・直前RoundPair
-   ・Pair成立回数
-
-   を比較する。
+   合計196通りなので十分軽量。
 ======================================== */
 
-function createOptimizedPairsV37(
+function createOptimizedPairsV38(
   leaders,
   followers,
   requiredPairCount,
-  previousRoundPairKeys
+  previousRoundPairKeys,
+  previousFinalIds
 ) {
 
   if (
@@ -565,24 +573,12 @@ function createOptimizedPairsV37(
   }
 
 
-  /*
-    今回出場させるLeader候補。
-
-    Lead7 / 6人出場なら
-    7通り。
-  */
-
   const leaderSelections =
     createCombinations(
       leaders,
       requiredPairCount
     );
 
-
-  /*
-    Follow8 / 6人出場なら
-    28通り。
-  */
 
   const followerSelections =
     createCombinations(
@@ -604,21 +600,11 @@ function createOptimizedPairsV37(
     null;
 
 
-  /*
-    Leader候補 × Follower候補を
-    全て比較する。
-
-    第2回条件：
-    7 × 28 = 196通り
-
-    なので十分軽量。
-  */
-
   leaderSelections.forEach(
     function (selectedLeaders) {
 
       const leaderSpread =
-        getProjectedDanceSpreadV37(
+        getProjectedDanceSpreadV38(
           leaders,
           selectedLeaders
         );
@@ -628,17 +614,25 @@ function createOptimizedPairsV37(
         function (selectedFollowers) {
 
           const followerSpread =
-            getProjectedDanceSpreadV37(
+            getProjectedDanceSpreadV38(
               followers,
               selectedFollowers
             );
 
 
+          /*
+            選ばれたメンバー内で
+            Pair構成まで最適化。
+
+            Round境界もここで評価する。
+          */
+
           const pairResult =
-            createBestPairAssignmentV37(
+            createBestPairAssignmentV38(
               selectedLeaders,
               selectedFollowers,
-              previousRoundPairKeys
+              previousRoundPairKeys,
+              previousFinalIds
             );
 
 
@@ -654,8 +648,9 @@ function createOptimizedPairsV37(
 
 
             /*
-              最も悪いRole側の
-              出場回数差。
+              Role別で見て
+              Round終了後に最も大きい
+              Dance回数差。
             */
 
             maximumSpread:
@@ -665,15 +660,21 @@ function createOptimizedPairsV37(
               ),
 
 
-            /*
-              同じmaximumSpreadなら、
-              Lead/Follow両方の差合計も比較。
-            */
-
             totalSpread:
               leaderSpread
               +
               followerSpread,
+
+
+            /*
+              前Round最終Battle
+              → 次Round Battle1
+
+              の最少重複人数。
+            */
+
+            boundaryOverlap:
+              pairResult.boundaryOverlap,
 
 
             repeatedPairCount:
@@ -696,7 +697,7 @@ function createOptimizedPairsV37(
           if (
             bestCandidate === null
             ||
-            compareRoundPairCandidateV37(
+            compareRoundPairCandidateV38(
               candidate,
               bestCandidate
             ) < 0
@@ -719,7 +720,7 @@ function createOptimizedPairsV37(
    Round終了後のDance回数差
 ======================================== */
 
-function getProjectedDanceSpreadV37(
+function getProjectedDanceSpreadV38(
   roleParticipants,
   selectedParticipants
 ) {
@@ -786,22 +787,26 @@ function getProjectedDanceSpreadV37(
 
 
 /* ========================================
-   Round候補比較
+   Round候補比較 v38
 
    優先順位：
 
-   1. Round終了後のDance回数差
-   2. Lead/Followの差合計
-   3. 成立済Pairの数を最少化
-   4. 直前Round同一Pairを最少化
-   5. Pair成立回数合計を最少化
-   6. ランダム
+   1. Dance公平性
+   2. Round境界連続人数
+   3. 成立済Pair数
+   4. 直前Round同一Pair
+   5. Pair成立回数
+   6. 同条件ならランダム
 ======================================== */
 
-function compareRoundPairCandidateV37(
+function compareRoundPairCandidateV38(
   a,
   b
 ) {
+
+  /*
+    ① Dance公平性
+  */
 
   if (
     a.maximumSpread !==
@@ -830,11 +835,34 @@ function compareRoundPairCandidateV37(
 
 
   /*
-    同じ公平性なら、
-    未成立Pairを最大限使用する。
+    ② Round境界
 
-    repeatedPairCountが少ないほど
-    未成立Pairが多い。
+    同じ公平性なら、
+    前Round最後 → 次Round最初の
+    連続参加人数を最優先で減らす。
+
+    0人にできる候補があれば
+    0人が必ず勝つ。
+  */
+
+  if (
+    a.boundaryOverlap !==
+    b.boundaryOverlap
+  ) {
+
+    return (
+      a.boundaryOverlap
+      -
+      b.boundaryOverlap
+    );
+  }
+
+
+  /*
+    ③ 未成立Pair優先
+
+    repeatedPairCountが少ないほど、
+    今回使われる未成立Pairが多い。
   */
 
   if (
@@ -851,8 +879,7 @@ function compareRoundPairCandidateV37(
 
 
   /*
-    成立済Pairを使う必要がある場合でも、
-    直前Roundと同じPairはさらに避ける。
+    ④ 直前Round同一Pair回避
   */
 
   if (
@@ -869,8 +896,8 @@ function compareRoundPairCandidateV37(
 
 
   /*
-    それでも同じなら、
-    成立回数が少ない組み合わせを優先。
+    ⑤ 成立済Pairを使う場合は
+       成立回数の少ないものを優先。
   */
 
   if (
@@ -895,14 +922,29 @@ function compareRoundPairCandidateV37(
 
 
 /* ========================================
-   選ばれたメンバー内で
-   最良Pairを作る
+   Pair割当 v38
+
+   選択済みLeader / Followerに対して
+   1対1Pairを作る。
+
+   v38では、
+
+   ・Battle1にできる2Pairの
+     Round境界重複人数
+   ・未成立Pair
+   ・直前RoundPair
+   ・履歴回数
+
+   をまとめて評価する。
+
+   DP方式で最適なPair割当を探す。
 ======================================== */
 
-function createBestPairAssignmentV37(
+function createBestPairAssignmentV38(
   selectedLeaders,
   selectedFollowers,
-  previousRoundPairKeys
+  previousRoundPairKeys,
+  previousFinalIds
 ) {
 
   const pairCount =
@@ -910,7 +952,7 @@ function createBestPairAssignmentV37(
 
 
   if (
-    pairCount === 0
+    pairCount < 2
     ||
     selectedFollowers.length !==
       pairCount
@@ -919,147 +961,306 @@ function createBestPairAssignmentV37(
   }
 
 
-  let maximumHistoryCount = 0;
+  /*
+    DP状態：
+
+    mask
+      使用済みFollower
+
+    min1 / min2
+      Pair単位で見た
+      前Round最終担当者との重複人数の
+      小さい方から2Pair分。
+
+    Battle1は2Pairなので、
+    min1 + min2 が
+    作成可能なBattle1の
+    最小重複人数になる。
+  */
+
+  let states =
+    new Map();
 
 
-  selectedLeaders.forEach(
-    function (leader) {
+  states.set(
+    "0|9|9",
+    {
+      mask: 0,
 
-      selectedFollowers.forEach(
-        function (follower) {
+      min1: 9,
 
-          maximumHistoryCount =
-            Math.max(
-              maximumHistoryCount,
+      min2: 9,
 
-              getPairHistoryCount(
-                leader,
-                follower
-              )
-            );
-        }
-      );
+      repeatedPairCount: 0,
+
+      consecutivePairCount: 0,
+
+      totalHistoryCount: 0,
+
+      assignment: [],
+
+      randomTie:
+        Math.random()
     }
   );
 
 
-  /*
-    Pair成立回数の合計より
-    「直前Round同一Pair」の方を強くする。
-  */
+  for (
+    let leaderIndex = 0;
+    leaderIndex < pairCount;
+    leaderIndex++
+  ) {
 
-  const maximumHistoryTotal =
-    pairCount *
-    maximumHistoryCount;
-
-
-  const consecutiveWeight =
-    maximumHistoryTotal + 1;
+    const nextStates =
+      new Map();
 
 
-  /*
-    直前Roundペナルティと履歴回数全部より
-    「成立済Pairを1組使う」方を強くする。
-
-    これにより未成立Pair最大化が
-    最優先になる。
-  */
-
-  const maximumLowerPriorityTotal =
-    (
-      pairCount *
-      consecutiveWeight
-    )
-    +
-    maximumHistoryTotal;
+    const leader =
+      selectedLeaders[
+        leaderIndex
+      ];
 
 
-  const repeatedPairWeight =
-    maximumLowerPriorityTotal + 1;
+    states.forEach(
+      function (state) {
+
+        for (
+          let followerIndex = 0;
+          followerIndex < pairCount;
+          followerIndex++
+        ) {
+
+          const bit =
+            1 << followerIndex;
 
 
-  const costMatrix =
-    selectedLeaders.map(
-      function (leader) {
-
-        return selectedFollowers.map(
-          function (follower) {
-
-            const historyCount =
-              getPairHistoryCount(
-                leader,
-                follower
-              );
+          if (
+            state.mask & bit
+          ) {
+            continue;
+          }
 
 
-            const key =
-              getHistoryKey(
-                leader,
-                follower
-              );
+          const follower =
+            selectedFollowers[
+              followerIndex
+            ];
 
 
-            const repeatedPenalty =
-              historyCount > 0
-                ? 1
-                : 0;
+          const historyCount =
+            getPairHistoryCount(
+              leader,
+              follower
+            );
 
 
-            const consecutivePenalty =
-              previousRoundPairKeys.has(
-                key
+          const pairKey =
+            getHistoryKey(
+              leader,
+              follower
+            );
+
+
+          /*
+            このPairに含まれる
+            前Round最終Battle参加者数。
+
+            0 / 1 / 2 のいずれか。
+          */
+
+          let pairOverlap = 0;
+
+
+          if (
+            previousFinalIds
+            &&
+            previousFinalIds.has(
+              String(
+                leader.id
               )
-                ? 1
-                : 0;
+            )
+          ) {
+            pairOverlap++;
+          }
 
 
-            return (
-              repeatedPenalty *
-              repeatedPairWeight
+          if (
+            previousFinalIds
+            &&
+            previousFinalIds.has(
+              String(
+                follower.id
+              )
+            )
+          ) {
+            pairOverlap++;
+          }
 
+
+          const newMinimums =
+            updateTwoSmallestV38(
+              state.min1,
+              state.min2,
+              pairOverlap
+            );
+
+
+          const newMask =
+            state.mask | bit;
+
+
+          const candidate = {
+
+            mask:
+              newMask,
+
+
+            min1:
+              newMinimums[0],
+
+
+            min2:
+              newMinimums[1],
+
+
+            repeatedPairCount:
+              state.repeatedPairCount
               +
+              (
+                historyCount > 0
+                  ? 1
+                  : 0
+              ),
 
-              consecutivePenalty *
-              consecutiveWeight
 
+            consecutivePairCount:
+              state.consecutivePairCount
               +
+              (
+                previousRoundPairKeys.has(
+                  pairKey
+                )
+                  ? 1
+                  : 0
+              ),
 
-              historyCount
+
+            totalHistoryCount:
+              state.totalHistoryCount
+              +
+              historyCount,
+
+
+            assignment:
+              [
+                ...state.assignment,
+                followerIndex
+              ],
+
+
+            randomTie:
+              Math.random()
+          };
+
+
+          /*
+            min1/min2が同じ状態なら、
+            Pair履歴側の優先順位で
+            最も良いものだけ残す。
+          */
+
+          const key =
+            newMask
+            +
+            "|"
+            +
+            candidate.min1
+            +
+            "|"
+            +
+            candidate.min2;
+
+
+          const existing =
+            nextStates.get(
+              key
+            );
+
+
+          if (
+            !existing
+            ||
+            compareAssignmentHistoryV38(
+              candidate,
+              existing
+            ) < 0
+          ) {
+
+            nextStates.set(
+              key,
+              candidate
             );
           }
-        );
+        }
       }
     );
 
 
-  /*
-    script.js既存のHungarian Algorithmを使用。
-  */
-
-  const assignment =
-    solveMinimumCostAssignment(
-      costMatrix
-    );
+    states =
+      nextStates;
+  }
 
 
   if (
-    !assignment
-    ||
-    assignment.length !==
-      pairCount
+    states.size === 0
   ) {
     return null;
   }
 
 
+  let best =
+    null;
+
+
+  states.forEach(
+    function (state) {
+
+      const boundaryOverlap =
+        state.min1
+        +
+        state.min2;
+
+
+      const candidate = {
+        ...state,
+
+        boundaryOverlap:
+          boundaryOverlap
+      };
+
+
+      if (
+        best === null
+        ||
+        compareCompletedAssignmentV38(
+          candidate,
+          best
+        ) < 0
+      ) {
+
+        best =
+          candidate;
+      }
+    }
+  );
+
+
+  if (!best) {
+    return null;
+  }
+
+
   const pairs = [];
-
-
-  let repeatedPairCount = 0;
-
-  let consecutivePairCount = 0;
-
-  let totalHistoryCount = 0;
 
 
   selectedLeaders.forEach(
@@ -1069,7 +1270,7 @@ function createBestPairAssignmentV37(
     ) {
 
       const followerIndex =
-        assignment[
+        best.assignment[
           leaderIndex
         ];
 
@@ -1086,52 +1287,14 @@ function createBestPairAssignmentV37(
       }
 
 
-      const follower =
-        selectedFollowers[
-          followerIndex
-        ];
-
-
-      const historyCount =
-        getPairHistoryCount(
-          leader,
-          follower
-        );
-
-
-      const key =
-        getHistoryKey(
-          leader,
-          follower
-        );
-
-
-      if (
-        historyCount > 0
-      ) {
-        repeatedPairCount++;
-      }
-
-
-      if (
-        previousRoundPairKeys.has(
-          key
-        )
-      ) {
-        consecutivePairCount++;
-      }
-
-
-      totalHistoryCount +=
-        historyCount;
-
-
       pairs.push({
         leader:
           leader,
 
         follower:
-          follower
+          selectedFollowers[
+            followerIndex
+          ]
       });
     }
   );
@@ -1150,47 +1313,255 @@ function createBestPairAssignmentV37(
     pairs:
       pairs,
 
+
+    boundaryOverlap:
+      best.boundaryOverlap,
+
+
     repeatedPairCount:
-      repeatedPairCount,
+      best.repeatedPairCount,
+
 
     consecutivePairCount:
-      consecutivePairCount,
+      best.consecutivePairCount,
+
 
     totalHistoryCount:
-      totalHistoryCount
+      best.totalHistoryCount
   };
 }
 
 
 /* ========================================
-   Round境界
+   2つの最小値を更新
 
-   Pairは絶対に組み直さず、
-   Battle順だけ変更する。
+   Battle1 = 2Pairなので、
+   全Pair中の重複人数が少ない2Pairを
+   覚えておけばよい。
 ======================================== */
 
-function moveBestBattleToFrontV37(
-  battles,
-  avoidIds
+function updateTwoSmallestV38(
+  min1,
+  min2,
+  value
 ) {
 
   if (
-    !Array.isArray(
-      battles
-    )
-    ||
-    battles.length === 0
+    value < min1
   ) {
-    return;
+
+    return [
+      value,
+      min1
+    ];
   }
 
 
   if (
-    !avoidIds
-    ||
-    avoidIds.size === 0
+    value < min2
   ) {
-    return;
+
+    return [
+      min1,
+      value
+    ];
+  }
+
+
+  return [
+    min1,
+    min2
+  ];
+}
+
+
+/* ========================================
+   同じDP状態内での比較
+
+   min1/min2は既に同じなので、
+
+   1. 成立済Pair数
+   2. 直前RoundPair
+   3. 履歴回数
+
+   で比較する。
+======================================== */
+
+function compareAssignmentHistoryV38(
+  a,
+  b
+) {
+
+  if (
+    a.repeatedPairCount !==
+    b.repeatedPairCount
+  ) {
+
+    return (
+      a.repeatedPairCount
+      -
+      b.repeatedPairCount
+    );
+  }
+
+
+  if (
+    a.consecutivePairCount !==
+    b.consecutivePairCount
+  ) {
+
+    return (
+      a.consecutivePairCount
+      -
+      b.consecutivePairCount
+    );
+  }
+
+
+  if (
+    a.totalHistoryCount !==
+    b.totalHistoryCount
+  ) {
+
+    return (
+      a.totalHistoryCount
+      -
+      b.totalHistoryCount
+    );
+  }
+
+
+  return (
+    a.randomTie
+    -
+    b.randomTie
+  );
+}
+
+
+/* ========================================
+   完成したPair割当の比較
+
+   1. Round境界重複
+   2. 成立済Pair数
+   3. 直前RoundPair
+   4. 履歴回数
+======================================== */
+
+function compareCompletedAssignmentV38(
+  a,
+  b
+) {
+
+  if (
+    a.boundaryOverlap !==
+    b.boundaryOverlap
+  ) {
+
+    return (
+      a.boundaryOverlap
+      -
+      b.boundaryOverlap
+    );
+  }
+
+
+  if (
+    a.repeatedPairCount !==
+    b.repeatedPairCount
+  ) {
+
+    return (
+      a.repeatedPairCount
+      -
+      b.repeatedPairCount
+    );
+  }
+
+
+  if (
+    a.consecutivePairCount !==
+    b.consecutivePairCount
+  ) {
+
+    return (
+      a.consecutivePairCount
+      -
+      b.consecutivePairCount
+    );
+  }
+
+
+  if (
+    a.totalHistoryCount !==
+    b.totalHistoryCount
+  ) {
+
+    return (
+      a.totalHistoryCount
+      -
+      b.totalHistoryCount
+    );
+  }
+
+
+  return (
+    a.randomTie
+    -
+    b.randomTie
+  );
+}
+
+
+/* ========================================
+   Battle生成 v38
+
+   Pairは既に確定済み。
+
+   Pairを組み直さず、
+
+   「どの2PairをBattle1にするか」
+
+   だけを最適化する。
+
+   優先順位：
+
+   1. 前Round最終担当者との重複人数
+   2. 同Role対戦履歴
+   3. 同条件ならランダム
+======================================== */
+
+function createBattlesWithProtectedFirstV38(
+  pairs,
+  previousFinalIds
+) {
+
+  if (
+    !Array.isArray(
+      pairs
+    )
+    ||
+    pairs.length < 2
+  ) {
+    return [];
+  }
+
+
+  /*
+    Round1など、
+    前Round情報がない場合は
+    従来のBattle生成をそのまま使用。
+  */
+
+  if (
+    !previousFinalIds
+    ||
+    previousFinalIds.size === 0
+  ) {
+
+    return createFairBattles(
+      pairs
+    );
   }
 
 
@@ -1198,20 +1569,59 @@ function moveBestBattleToFrontV37(
     Infinity;
 
 
-  let bestIndexes =
+  let minimumOpponentScore =
+    Infinity;
+
+
+  let bestCandidates =
     [];
 
 
-  battles.forEach(
-    function (
-      battle,
-      index
+  for (
+    let i = 0;
+    i < pairs.length - 1;
+    i++
+  ) {
+
+    for (
+      let j = i + 1;
+      j < pairs.length;
+      j++
     ) {
+
+      const pairA =
+        pairs[i];
+
+
+      const pairB =
+        pairs[j];
+
+
+      const battle = {
+        pairA:
+          pairA,
+
+        pairB:
+          pairB,
+
+        judges: [],
+
+        timekeeper:
+          null
+      };
+
 
       const overlap =
         getBattleDanceOverlapCount(
           battle,
-          avoidIds
+          previousFinalIds
+        );
+
+
+      const opponentScore =
+        getBattleOpponentScore(
+          pairA,
+          pairB
         );
 
 
@@ -1224,55 +1634,140 @@ function moveBestBattleToFrontV37(
           overlap;
 
 
-        bestIndexes =
-          [index];
+        minimumOpponentScore =
+          opponentScore;
+
+
+        bestCandidates =
+          [{
+            indexA: i,
+            indexB: j,
+            pairA: pairA,
+            pairB: pairB
+          }];
 
       } else if (
         overlap ===
         minimumOverlap
       ) {
 
-        bestIndexes.push(
-          index
-        );
+        if (
+          opponentScore <
+          minimumOpponentScore
+        ) {
+
+          minimumOpponentScore =
+            opponentScore;
+
+
+          bestCandidates =
+            [{
+              indexA: i,
+              indexB: j,
+              pairA: pairA,
+              pairB: pairB
+            }];
+
+        } else if (
+          opponentScore ===
+          minimumOpponentScore
+        ) {
+
+          bestCandidates.push({
+            indexA: i,
+            indexB: j,
+            pairA: pairA,
+            pairB: pairB
+          });
+        }
       }
     }
-  );
-
-
-  if (
-    bestIndexes.length === 0
-  ) {
-    return;
   }
 
 
-  const selectedIndex =
+  if (
+    bestCandidates.length === 0
+  ) {
+
+    return createFairBattles(
+      pairs
+    );
+  }
+
+
+  const selected =
     getRandomItem(
-      bestIndexes
+      bestCandidates
+    );
+
+
+  const battles = [
+    {
+      pairA:
+        selected.pairA,
+
+      pairB:
+        selected.pairB,
+
+      judges: [],
+
+      timekeeper:
+        null
+    }
+  ];
+
+
+  /*
+    Battle1で使ったPairだけ除き、
+    残りは従来の対戦履歴ロジックで
+    Battleを作る。
+  */
+
+  const remainingPairs =
+    pairs.filter(
+      function (
+        pair,
+        index
+      ) {
+
+        return (
+          index !==
+          selected.indexA
+          &&
+          index !==
+          selected.indexB
+        );
+      }
     );
 
 
   if (
-    selectedIndex !== 0
+    remainingPairs.length >= 2
   ) {
 
-    [
-      battles[0],
-      battles[selectedIndex]
-    ] = [
-      battles[selectedIndex],
-      battles[0]
-    ];
+    const remainingBattles =
+      createFairBattles(
+        remainingPairs
+      );
+
+
+    battles.push(
+      ...remainingBattles
+    );
   }
+
+
+  return battles;
 }
 
 
 /* ========================================
-   Judge v37
+   Judge v38
+
+   v37と同じ方針。
 ======================================== */
 
-function selectJudgesForBattleV37(
+function selectJudgesForBattleV38(
   battle,
   requestedCount,
   avoidIds = new Set()
@@ -1352,10 +1847,9 @@ function selectJudgesForBattleV37(
 
   /*
     回避対象を除いても
-    3人揃う場合は、
-    Judge済みの人などを完全除外。
+    必要人数が揃うなら完全に除外。
 
-    足りない場合のみ再登板可。
+    足りない場合のみ再登板可能。
   */
 
   const candidates =
@@ -1432,17 +1926,17 @@ function selectJudgesForBattleV37(
 
 
 /* ========================================
-   Timekeeper v37
+   Timekeeper v38
 
    Battle単位。
 
    DanceでもJudgeでもない人を優先。
 
-   他BattleでDanceしている人は
+   他BattleでDanceする人でも
    Timekeeper候補になってよい。
 ======================================== */
 
-function selectTimekeeperForBattleV37(
+function selectTimekeeperForBattleV38(
   battle,
   usedTimekeeperIds
 ) {
@@ -1480,6 +1974,15 @@ function selectTimekeeperForBattleV37(
     );
 
 
+  /*
+    そのBattleで
+
+    ・Danceしていない
+    ・Judgeでもない
+
+    人を候補にする。
+  */
+
   const idleCandidates =
     participants.filter(
       function (participant) {
@@ -1509,18 +2012,11 @@ function selectTimekeeperForBattleV37(
     );
 
 
-  /*
-    通常はこちら。
-
-    そのBattleで
-    DanceにもJudgeにも入っていない人。
-  */
-
   if (
     idleCandidates.length > 0
   ) {
 
-    return selectFairTimekeeperV37(
+    return selectFairTimekeeperV38(
       idleCandidates,
       usedTimekeeperIds
     );
@@ -1528,15 +2024,16 @@ function selectTimekeeperForBattleV37(
 
 
   /*
-    候補が本当に0人の場合のみ
-    Judgeと兼任。
+    Dance・Judge以外が
+    本当に1人もいない場合のみ
+    Judgeから兼任。
   */
 
   if (
     battle.judges.length > 0
   ) {
 
-    return selectFairTimekeeperV37(
+    return selectFairTimekeeperV38(
       battle.judges,
       usedTimekeeperIds
     );
@@ -1551,7 +2048,7 @@ function selectTimekeeperForBattleV37(
    Timekeeper公平選定
 ======================================== */
 
-function selectFairTimekeeperV37(
+function selectFairTimekeeperV38(
   candidates,
   usedTimekeeperIds
 ) {
@@ -1566,8 +2063,8 @@ function selectFairTimekeeperV37(
 
 
   /*
-    同一RoundでまだTをしていない人を
-    最優先。
+    同一RoundでまだTimekeeperを
+    していない人を最優先。
   */
 
   const unusedCandidates =
@@ -1592,7 +2089,7 @@ function selectFairTimekeeperV37(
 
 
   /*
-    その中でT回数が少ない人。
+    その中でT回数の少ない人。
   */
 
   let minimumCount =
