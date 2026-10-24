@@ -1,28 +1,34 @@
 /* ========================================
    Hustle Battle Generator
-   Pickup Battle v39
+   Pickup Battle v40
 
-   対面方式v38は変更しない。
-
-   ピックアップ方式のみ追加する。
-
-   主な仕様
+   v39からの変更
    ----------------------------------------
-   ・2 / 3 / 4 / 5 Pair同時を選択可能
-   ・1BattleのPair数は常に指定数を維持
-   ・端数分は同一Round内で再出場
-   ・再出場時もPairは組み替える
-   ・BothはBattleごとにLeader / Follower可変
-   ・同一Battleで同じ人は1回だけ
-   ・前Round未出場者を次Roundで優先
-   ・Dance回数を公平化
+   ・Battle / Roundの評価順位は変更しない
+   ・探索回数も基本維持
+   ・Pair候補の全件sort()を廃止
+   ・上位候補のみ保持する方式へ変更
+   ・Pair履歴 / 直前Round Pair情報を
+     Round生成中キャッシュ
+   ・結果品質をなるべく維持しながら
+     計算量のみ削減
+
+   Pickup仕様
+   ----------------------------------------
+   ・2 / 3 / 4 / 5 Pair同時
+   ・1BattleのPair数は指定数固定
+   ・端数分は再出場
+   ・再出場時もPairを変更
+   ・BothはBattleごとにRole可変
+   ・同一Battleで同じ人は1回のみ
+   ・前Round未出場者を優先
+   ・Dance公平性
    ・同一Round同一Pairを強く回避
-   ・未成立Pairを優先
-   ・前Round最後 → 次Round最初の連続を回避
-   ・同一Round内の連続Danceを回避
+   ・未成立Pair優先
+   ・前Round最後→次Round最初を回避
+   ・同Round連続Danceを回避
    ・Judge 3人
    ・Timekeeper 1人
-   ・対戦履歴は更新しない
 ======================================== */
 
 
@@ -53,12 +59,6 @@ const roundFormatDescription =
 
 /* ========================================
    Generate Roundイベント切替
-
-   v38で登録済みのイベントを外し、
-   v39の振り分け関数へ変更。
-
-   対面方式の場合は
-   generateRoundV38() をそのまま呼ぶ。
 ======================================== */
 
 generateRoundButton.removeEventListener(
@@ -68,33 +68,40 @@ generateRoundButton.removeEventListener(
 
 generateRoundButton.addEventListener(
   "click",
-  generateRoundByFormatV39
+  generateRoundByFormatV40
 );
 
 
-async function generateRoundByFormatV39() {
+async function generateRoundByFormatV40() {
+
   const format =
     battleFormatSelect
       ? battleFormatSelect.value
       : "faceToFace";
 
 
-  if (format === "pickup") {
-    await generatePickupRoundV39();
+  if (
+    format === "pickup"
+  ) {
+
+    await generatePickupRoundV40();
 
   } else {
+
     await generateRoundV38();
   }
 }
 
 
 /* ========================================
-   方式選択UI
+   UI切替
 ======================================== */
 
-function updateBattleFormatUIV39() {
+function updateBattleFormatUIV40() {
+
   if (
-    !battleFormatSelect ||
+    !battleFormatSelect
+    ||
     !pickupSettings
   ) {
     return;
@@ -112,41 +119,40 @@ function updateBattleFormatUIV39() {
   );
 
 
-  if (roundFormatDescription) {
+  if (
+    roundFormatDescription
+  ) {
 
-    if (isPickup) {
-
-      roundFormatDescription.textContent =
-        "複数Pairが同時に踊るピックアップ方式です。Pair数を選択してください。";
-
-    } else {
-
-      roundFormatDescription.textContent =
-        "2Pairが対面する従来のBattle方式です。";
-    }
+    roundFormatDescription.textContent =
+      isPickup
+        ? "複数Pairが同時に踊るピックアップ方式です。Pair数を選択してください。"
+        : "2Pairが対面する従来のBattle方式です。";
   }
 }
 
 
-if (battleFormatSelect) {
+if (
+  battleFormatSelect
+) {
 
   battleFormatSelect.addEventListener(
     "change",
-    updateBattleFormatUIV39
+    updateBattleFormatUIV40
   );
 }
 
 
-updateBattleFormatUIV39();
+updateBattleFormatUIV40();
 
 
 /* ========================================
-   Role判定
+   Role
 ======================================== */
 
-function canLeadV39(
+function canLeadV40(
   participant
 ) {
+
   return (
     participant.role === "leader"
     ||
@@ -155,9 +161,10 @@ function canLeadV39(
 }
 
 
-function canFollowV39(
+function canFollowV40(
   participant
 ) {
+
   return (
     participant.role === "follower"
     ||
@@ -170,8 +177,11 @@ function canFollowV39(
    Pickup Round生成
 ======================================== */
 
-async function generatePickupRoundV39() {
-  if (!isCurrentUserAdmin) {
+async function generatePickupRoundV40() {
+
+  if (
+    !isCurrentUserAdmin
+  ) {
     return;
   }
 
@@ -198,7 +208,9 @@ async function generatePickupRoundV39() {
 
   const activeDanceParticipants =
     participants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           participant.active !== false
@@ -210,10 +222,6 @@ async function generatePickupRoundV39() {
       }
     );
 
-
-  /*
-    1Battleで必要なDance人数
-  */
 
   const requiredDancers =
     pairCount * 2;
@@ -244,13 +252,13 @@ async function generatePickupRoundV39() {
 
   const possibleLeaders =
     activeDanceParticipants.filter(
-      canLeadV39
+      canLeadV40
     );
 
 
   const possibleFollowers =
     activeDanceParticipants.filter(
-      canFollowV39
+      canFollowV40
     );
 
 
@@ -305,7 +313,7 @@ async function generatePickupRoundV39() {
 
 
   const battleNumber =
-    calculatePickupBattleCountV39(
+    calculatePickupBattleCountV40(
       activeDanceParticipants,
       pairCount
     );
@@ -320,31 +328,46 @@ async function generatePickupRoundV39() {
 
 
   const previousWaitingIds =
-    getPreviousWaitingIdsV39();
+    getPreviousWaitingIdsV40();
 
 
   /*
-    Round全体を複数回試行し、
-    最も条件の良いScheduleを採用する。
+    v40高速化ポイント。
 
-    Battleを1つずつ確定してしまうと
-    最後のBattleでPair選択肢がなくなるため、
-    Round全体の候補を比較する。
+    Pair履歴はRound生成の探索中には変化しない。
+
+    v39では何十万回も
+    getPairHistoryCount()
+    getHistoryKey()
+    previousRoundPairKeys.has()
+    を呼んでいた。
+
+    v40では最初に1回だけ計算して
+    Mapへ保存する。
   */
 
+  const pairMetricCache =
+    buildPickupPairMetricCacheV40(
+      activeDanceParticipants,
+      previousRoundPairKeys
+    );
+
+
   const schedule =
-    createPickupScheduleV39(
+    createPickupScheduleV40(
       activeDanceParticipants,
       pairCount,
       battleNumber,
       previousFinalIds,
       previousRoundPairKeys,
-      previousWaitingIds
+      previousWaitingIds,
+      pairMetricCache
     );
 
 
   if (
-    !schedule ||
+    !schedule
+    ||
     schedule.length !==
       battleNumber
   ) {
@@ -360,7 +383,7 @@ async function generatePickupRoundV39() {
 
 
   /* =====================================
-     Dance回数・Pair履歴更新
+     Dance / Pair履歴更新
   ====================================== */
 
   const roundDanceCounts =
@@ -368,10 +391,14 @@ async function generatePickupRoundV39() {
 
 
   activeDanceParticipants.forEach(
-    function (participant) {
+    function (
+      participant
+    ) {
 
       roundDanceCounts.set(
-        String(participant.id),
+        String(
+          participant.id
+        ),
         0
       );
     }
@@ -379,10 +406,14 @@ async function generatePickupRoundV39() {
 
 
   schedule.forEach(
-    function (battle) {
+    function (
+      battle
+    ) {
 
       battle.pairs.forEach(
-        function (pair) {
+        function (
+          pair
+        ) {
 
           const leaderId =
             String(
@@ -434,11 +465,6 @@ async function generatePickupRoundV39() {
             ) + 1;
 
 
-          /*
-            Pair履歴は
-            対面 / Pickup共通。
-          */
-
           addPairHistory(
             pair.leader,
             pair.follower
@@ -450,13 +476,7 @@ async function generatePickupRoundV39() {
 
 
   /* =====================================
-     Judge選定
-
-     既存思想を維持。
-
-     ・そのBattleのDancerは除外
-     ・同一RoundでJudge済みを回避
-     ・Battle1では前Round最終担当者を回避
+     Judge
   ====================================== */
 
   const roundJudgeUsedIds =
@@ -478,10 +498,14 @@ async function generatePickupRoundV39() {
       ) {
 
         previousFinalIds.forEach(
-          function (id) {
+          function (
+            id
+          ) {
 
             avoidIds.add(
-              String(id)
+              String(
+                id
+              )
             );
           }
         );
@@ -489,17 +513,21 @@ async function generatePickupRoundV39() {
 
 
       roundJudgeUsedIds.forEach(
-        function (id) {
+        function (
+          id
+        ) {
 
           avoidIds.add(
-            String(id)
+            String(
+              id
+            )
           );
         }
       );
 
 
       battle.judges =
-        selectPickupJudgesV39(
+        selectPickupJudgesV40(
           battle,
           3,
           avoidIds
@@ -507,7 +535,9 @@ async function generatePickupRoundV39() {
 
 
       battle.judges.forEach(
-        function (judge) {
+        function (
+          judge
+        ) {
 
           judge.judgeCount++;
 
@@ -531,15 +561,6 @@ async function generatePickupRoundV39() {
 
   /* =====================================
      Timekeeper
-
-     Judge決定後にBattle単位で選ぶ。
-
-     ・そのBattleでDanceしていない
-     ・Judgeでもない
-     ・同RoundでT未担当
-     ・T回数が少ない
-
-     候補0の場合のみJudge兼任。
   ====================================== */
 
   const roundTimekeeperUsedIds =
@@ -547,10 +568,12 @@ async function generatePickupRoundV39() {
 
 
   schedule.forEach(
-    function (battle) {
+    function (
+      battle
+    ) {
 
       const timekeeper =
-        selectPickupTimekeeperV39(
+        selectPickupTimekeeperV40(
           battle,
           roundTimekeeperUsedIds
         );
@@ -560,7 +583,9 @@ async function generatePickupRoundV39() {
         timekeeper;
 
 
-      if (timekeeper) {
+      if (
+        timekeeper
+      ) {
 
         timekeeper.timekeeperCount =
           getNumberOrZero(
@@ -585,12 +610,14 @@ async function generatePickupRoundV39() {
 
 
   /* =====================================
-     今回一度もDanceしなかった人
+     今回Danceなし
   ====================================== */
 
   const waitingParticipants =
     activeDanceParticipants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           (
@@ -599,8 +626,7 @@ async function generatePickupRoundV39() {
                 participant.id
               )
             ) || 0
-          )
-          === 0
+          ) === 0
         );
       }
     );
@@ -610,7 +636,7 @@ async function generatePickupRoundV39() {
 
 
   lastRoundData =
-    serializePickupRoundV39(
+    serializePickupRoundV40(
       schedule,
       waitingParticipants,
       currentRound,
@@ -629,38 +655,229 @@ async function generatePickupRoundV39() {
 
 
 /* ========================================
-   Battle数計算
+   Pair固定情報キャッシュ
 
-   条件：
-   ・全員を最低1回出せるだけのDance枠
-   ・固定Leaderを最低1回出せるLeader枠
-   ・固定Followerを最低1回出せるFollower枠
+   Map key:
+   "leaderId|followerId"
 
-   の最大値。
-
-   例：
-   Lead7 / Follow8 / 3Pair
-
-   全体：
-   ceil(15 / 6) = 3
-
-   Leader：
-   ceil(7 / 3) = 3
-
-   Follow：
-   ceil(8 / 3) = 3
-
-   → 3Battle
+   value:
+   {
+     pairKey,
+     historyCount,
+     existingPair,
+     previousRoundPair
+   }
 ======================================== */
 
-function calculatePickupBattleCountV39(
+function buildPickupPairMetricCacheV40(
+  danceParticipants,
+  previousRoundPairKeys
+) {
+
+  const cache =
+    new Map();
+
+
+  danceParticipants.forEach(
+    function (
+      leader
+    ) {
+
+      if (
+        !canLeadV40(
+          leader
+        )
+      ) {
+        return;
+      }
+
+
+      danceParticipants.forEach(
+        function (
+          follower
+        ) {
+
+          if (
+            !canFollowV40(
+              follower
+            )
+          ) {
+            return;
+          }
+
+
+          if (
+            String(
+              leader.id
+            ) ===
+            String(
+              follower.id
+            )
+          ) {
+            return;
+          }
+
+
+          const cacheKey =
+            getPickupPairCacheKeyV40(
+              leader.id,
+              follower.id
+            );
+
+
+          const pairKey =
+            getHistoryKey(
+              leader,
+              follower
+            );
+
+
+          const historyCount =
+            getPairHistoryCount(
+              leader,
+              follower
+            );
+
+
+          cache.set(
+            cacheKey,
+            {
+
+              pairKey:
+                pairKey,
+
+              historyCount:
+                historyCount,
+
+              existingPair:
+                historyCount > 0
+                  ? 1
+                  : 0,
+
+              previousRoundPair:
+                previousRoundPairKeys.has(
+                  pairKey
+                )
+                  ? 1
+                  : 0
+            }
+          );
+        }
+      );
+    }
+  );
+
+
+  return cache;
+}
+
+
+function getPickupPairCacheKeyV40(
+  leaderId,
+  followerId
+) {
+
+  return (
+    String(
+      leaderId
+    )
+    +
+    "|"
+    +
+    String(
+      followerId
+    )
+  );
+}
+
+
+function getPickupPairMetricV40(
+  leader,
+  follower,
+  pairMetricCache
+) {
+
+  const key =
+    getPickupPairCacheKeyV40(
+      leader.id,
+      follower.id
+    );
+
+
+  const cached =
+    pairMetricCache.get(
+      key
+    );
+
+
+  if (
+    cached
+  ) {
+    return cached;
+  }
+
+
+  /*
+    通常ここには来ないが、
+    念のためfallback。
+  */
+
+  const pairKey =
+    getHistoryKey(
+      leader,
+      follower
+    );
+
+
+  const historyCount =
+    getPairHistoryCount(
+      leader,
+      follower
+    );
+
+
+  const result = {
+
+    pairKey:
+      pairKey,
+
+    historyCount:
+      historyCount,
+
+    existingPair:
+      historyCount > 0
+        ? 1
+        : 0,
+
+    previousRoundPair:
+      0
+  };
+
+
+  pairMetricCache.set(
+    key,
+    result
+  );
+
+
+  return result;
+}
+
+
+/* ========================================
+   Battle数
+======================================== */
+
+function calculatePickupBattleCountV40(
   danceParticipants,
   pairCount
 ) {
 
   const fixedLeaders =
     danceParticipants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           participant.role ===
@@ -672,7 +889,9 @@ function calculatePickupBattleCountV39(
 
   const fixedFollowers =
     danceParticipants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           participant.role ===
@@ -684,7 +903,8 @@ function calculatePickupBattleCountV39(
 
   const byTotal =
     Math.ceil(
-      danceParticipants.length /
+      danceParticipants.length
+      /
       (
         pairCount * 2
       )
@@ -693,14 +913,16 @@ function calculatePickupBattleCountV39(
 
   const byLeader =
     Math.ceil(
-      fixedLeaders /
+      fixedLeaders
+      /
       pairCount
     );
 
 
   const byFollower =
     Math.ceil(
-      fixedFollowers /
+      fixedFollowers
+      /
       pairCount
     );
 
@@ -715,29 +937,36 @@ function calculatePickupBattleCountV39(
 
 
 /* ========================================
-   前RoundDance未出場者
+   前Round未出場者
 ======================================== */
 
-function getPreviousWaitingIdsV39() {
+function getPreviousWaitingIdsV40() {
+
   const result =
     new Set();
 
 
   if (
-    !lastRoundData ||
+    !lastRoundData
+    ||
     !Array.isArray(
       lastRoundData.waitingIds
     )
   ) {
+
     return result;
   }
 
 
   lastRoundData.waitingIds.forEach(
-    function (id) {
+    function (
+      id
+    ) {
 
       result.add(
-        String(id)
+        String(
+          id
+        )
       );
     }
   );
@@ -748,22 +977,17 @@ function getPreviousWaitingIdsV39() {
 
 
 /* ========================================
-   Round Schedule生成
-
-   ランダム探索を複数回行い、
-   Round全体スコアが最良のものを採用。
-
-   人数15名前後を想定しているため
-   十分軽量。
+   Schedule探索
 ======================================== */
 
-function createPickupScheduleV39(
+function createPickupScheduleV40(
   danceParticipants,
   pairCount,
   battleNumber,
   previousFinalIds,
   previousRoundPairKeys,
-  previousWaitingIds
+  previousWaitingIds,
+  pairMetricCache
 ) {
 
   let bestSchedule =
@@ -775,10 +999,11 @@ function createPickupScheduleV39(
 
 
   /*
-    試行回数。
+    v40では探索回数自体は
+    v39と同じ700回を維持。
 
-    同じ条件でも候補を複数探索し、
-    Battle後半でのPair重複を減らす。
+    まず品質を落とさず、
+    1回あたりの処理を軽くする。
   */
 
   const scheduleAttempts =
@@ -796,7 +1021,9 @@ function createPickupScheduleV39(
 
 
     danceParticipants.forEach(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         roundAppearances.set(
           String(
@@ -831,7 +1058,7 @@ function createPickupScheduleV39(
     ) {
 
       const battle =
-        createPickupBattleCandidateV39(
+        createPickupBattleCandidateV40(
           danceParticipants,
           pairCount,
           battleIndex,
@@ -839,14 +1066,17 @@ function createPickupScheduleV39(
           roundPairKeys,
           previousBattleDancerIds,
           previousFinalIds,
-          previousRoundPairKeys,
-          previousWaitingIds
+          previousWaitingIds,
+          pairMetricCache
         );
 
 
-      if (!battle) {
+      if (
+        !battle
+      ) {
 
-        failed = true;
+        failed =
+          true;
 
         break;
       }
@@ -862,13 +1092,17 @@ function createPickupScheduleV39(
 
 
       battle.pairs.forEach(
-        function (pair) {
+        function (
+          pair
+        ) {
 
           [
             pair.leader,
             pair.follower
           ].forEach(
-            function (participant) {
+            function (
+              participant
+            ) {
 
               const id =
                 String(
@@ -893,11 +1127,16 @@ function createPickupScheduleV39(
           );
 
 
-          roundPairKeys.add(
-            getHistoryKey(
+          const metric =
+            getPickupPairMetricV40(
               pair.leader,
-              pair.follower
-            )
+              pair.follower,
+              pairMetricCache
+            );
+
+
+          roundPairKeys.add(
+            metric.pairKey
           );
         }
       );
@@ -909,27 +1148,31 @@ function createPickupScheduleV39(
 
 
     if (
-      failed ||
+      failed
+      ||
       battles.length !==
         battleNumber
     ) {
+
       continue;
     }
 
 
     const score =
-      scorePickupScheduleV39(
+      scorePickupScheduleV40(
         battles,
         danceParticipants,
         previousFinalIds,
         previousRoundPairKeys,
-        previousWaitingIds
+        previousWaitingIds,
+        pairMetricCache
       );
 
 
     if (
-      bestScore === null ||
-      comparePickupScheduleScoresV39(
+      bestScore === null
+      ||
+      comparePickupScheduleScoresV40(
         score,
         bestScore
       ) < 0
@@ -944,17 +1187,12 @@ function createPickupScheduleV39(
 
 
       /*
-        非常に良いScheduleなら
-        無駄な探索を減らす。
+        v39から存在する
+        完全条件での早期終了。
 
-        ・全員最低1回
-        ・前Round未出場者全員出場
-        ・Round内Pair重複0
-        ・成立済Pair0
-        ・境界重複0
-        ・連続Dance0
-
-        が全て満たされた場合。
+        条件を緩めると
+        Pair品質低下の可能性があるため、
+        v40ではまだ変更しない。
       */
 
       if (
@@ -970,6 +1208,7 @@ function createPickupScheduleV39(
         &&
         score.adjacentOverlap === 0
       ) {
+
         break;
       }
     }
@@ -981,13 +1220,10 @@ function createPickupScheduleV39(
 
 
 /* ========================================
-   1Battle候補生成
-
-   Battleを何度か作り、
-   最良候補を返す。
+   Battle候補
 ======================================== */
 
-function createPickupBattleCandidateV39(
+function createPickupBattleCandidateV40(
   danceParticipants,
   pairCount,
   battleIndex,
@@ -995,8 +1231,8 @@ function createPickupBattleCandidateV39(
   roundPairKeys,
   previousBattleDancerIds,
   previousFinalIds,
-  previousRoundPairKeys,
-  previousWaitingIds
+  previousWaitingIds,
+  pairMetricCache
 ) {
 
   let bestBattle =
@@ -1006,6 +1242,12 @@ function createPickupBattleCandidateV39(
   let bestScore =
     null;
 
+
+  /*
+    v39同様100回。
+
+    ここもまず削減しない。
+  */
 
   const battleAttempts =
     100;
@@ -1036,7 +1278,7 @@ function createPickupBattleCandidateV39(
     ) {
 
       const candidates =
-        createPickupPairCandidatesV39(
+        createPickupPairCandidatesV40(
           danceParticipants,
           usedIds,
           battleIndex,
@@ -1044,8 +1286,8 @@ function createPickupBattleCandidateV39(
           roundPairKeys,
           previousBattleDancerIds,
           previousFinalIds,
-          previousRoundPairKeys,
-          previousWaitingIds
+          previousWaitingIds,
+          pairMetricCache
         );
 
 
@@ -1053,30 +1295,30 @@ function createPickupBattleCandidateV39(
         candidates.length === 0
       ) {
 
-        failed = true;
+        failed =
+          true;
 
         break;
       }
 
 
-      candidates.sort(
-        comparePickupPairChoiceV39
-      );
-
-
       /*
-        完全に1位だけを取り続けると
-        Battle後半で詰まる場合があるため、
-        上位候補から少しランダムに選ぶ。
+        v39：
+        candidates.sort(...)
+        → 全候補を完全ソート。
+
+        v40：
+        上位5件だけを1回走査で抽出。
+
+        最終的に使用するのは
+        元々上位5件だけなので、
+        選択条件は変えない。
       */
 
       const candidatePool =
-        candidates.slice(
-          0,
-          Math.min(
-            5,
-            candidates.length
-          )
+        getTopPickupPairCandidatesV40(
+          candidates,
+          5
         );
 
 
@@ -1086,7 +1328,19 @@ function createPickupBattleCandidateV39(
         );
 
 
+      if (
+        !selected
+      ) {
+
+        failed =
+          true;
+
+        break;
+      }
+
+
       pairs.push({
+
         leader:
           selected.leader,
 
@@ -1111,10 +1365,12 @@ function createPickupBattleCandidateV39(
 
 
     if (
-      failed ||
+      failed
+      ||
       pairs.length !==
         pairCount
     ) {
+
       continue;
     }
 
@@ -1126,26 +1382,28 @@ function createPickupBattleCandidateV39(
 
       judges: [],
 
-      timekeeper: null
+      timekeeper:
+        null
     };
 
 
     const score =
-      scorePickupBattleV39(
+      scorePickupBattleV40(
         battle,
         battleIndex,
         roundAppearances,
         roundPairKeys,
         previousBattleDancerIds,
         previousFinalIds,
-        previousRoundPairKeys,
-        previousWaitingIds
+        previousWaitingIds,
+        pairMetricCache
       );
 
 
     if (
-      bestScore === null ||
-      comparePickupBattleScoresV39(
+      bestScore === null
+      ||
+      comparePickupBattleScoresV40(
         score,
         bestScore
       ) < 0
@@ -1166,13 +1424,95 @@ function createPickupBattleCandidateV39(
 
 
 /* ========================================
-   Pair候補作成
+   上位N候補のみ抽出
 
-   同一Battleでは
-   同じ人を2回使用しない。
+   全件sortをしない。
+
+   topListは最大5件なので、
+   候補数が多くても処理量が小さい。
 ======================================== */
 
-function createPickupPairCandidatesV39(
+function getTopPickupPairCandidatesV40(
+  candidates,
+  limit
+) {
+
+  const topList =
+    [];
+
+
+  candidates.forEach(
+    function (
+      candidate
+    ) {
+
+      let insertIndex =
+        topList.length;
+
+
+      for (
+        let i = 0;
+        i < topList.length;
+        i++
+      ) {
+
+        if (
+          comparePickupPairChoiceV40(
+            candidate,
+            topList[i]
+          ) < 0
+        ) {
+
+          insertIndex =
+            i;
+
+          break;
+        }
+      }
+
+
+      if (
+        insertIndex <
+        limit
+      ) {
+
+        topList.splice(
+          insertIndex,
+          0,
+          candidate
+        );
+
+
+        if (
+          topList.length >
+          limit
+        ) {
+
+          topList.pop();
+        }
+
+      } else if (
+        topList.length <
+        limit
+      ) {
+
+        topList.push(
+          candidate
+        );
+      }
+    }
+  );
+
+
+  return topList;
+}
+
+
+/* ========================================
+   Pair候補
+======================================== */
+
+function createPickupPairCandidatesV40(
   danceParticipants,
   usedIds,
   battleIndex,
@@ -1180,8 +1520,8 @@ function createPickupPairCandidatesV39(
   roundPairKeys,
   previousBattleDancerIds,
   previousFinalIds,
-  previousRoundPairKeys,
-  previousWaitingIds
+  previousWaitingIds,
+  pairMetricCache
 ) {
 
   const candidates =
@@ -1189,10 +1529,12 @@ function createPickupPairCandidatesV39(
 
 
   danceParticipants.forEach(
-    function (leader) {
+    function (
+      leader
+    ) {
 
       if (
-        !canLeadV39(
+        !canLeadV40(
           leader
         )
       ) {
@@ -1200,11 +1542,15 @@ function createPickupPairCandidatesV39(
       }
 
 
+      const leaderId =
+        String(
+          leader.id
+        );
+
+
       if (
         usedIds.has(
-          String(
-            leader.id
-          )
+          leaderId
         )
       ) {
         return;
@@ -1212,10 +1558,12 @@ function createPickupPairCandidatesV39(
 
 
       danceParticipants.forEach(
-        function (follower) {
+        function (
+          follower
+        ) {
 
           if (
-            !canFollowV39(
+            !canFollowV40(
               follower
             )
           ) {
@@ -1223,13 +1571,15 @@ function createPickupPairCandidatesV39(
           }
 
 
-          if (
-            String(
-              leader.id
-            ) ===
+          const followerId =
             String(
               follower.id
-            )
+            );
+
+
+          if (
+            leaderId ===
+            followerId
           ) {
             return;
           }
@@ -1237,31 +1587,18 @@ function createPickupPairCandidatesV39(
 
           if (
             usedIds.has(
-              String(
-                follower.id
-              )
+              followerId
             )
           ) {
             return;
           }
 
 
-          const pairKey =
-            getHistoryKey(
+          const metric =
+            getPickupPairMetricV40(
               leader,
-              follower
-            );
-
-
-          const leaderId =
-            String(
-              leader.id
-            );
-
-
-          const followerId =
-            String(
-              follower.id
+              follower,
+              pairMetricCache
             );
 
 
@@ -1315,28 +1652,7 @@ function createPickupPairCandidatesV39(
 
           const sameRoundPair =
             roundPairKeys.has(
-              pairKey
-            )
-              ? 1
-              : 0;
-
-
-          const historyCount =
-            getPairHistoryCount(
-              leader,
-              follower
-            );
-
-
-          const existingPair =
-            historyCount > 0
-              ? 1
-              : 0;
-
-
-          const previousRoundPair =
-            previousRoundPairKeys.has(
-              pairKey
+              metric.pairKey
             )
               ? 1
               : 0;
@@ -1430,13 +1746,13 @@ function createPickupPairCandidatesV39(
               sameRoundPair,
 
             existingPair:
-              existingPair,
+              metric.existingPair,
 
             previousRoundPair:
-              previousRoundPair,
+              metric.previousRoundPair,
 
             historyCount:
-              historyCount,
+              metric.historyCount,
 
             boundaryOverlap:
               boundaryOverlap,
@@ -1459,21 +1775,12 @@ function createPickupPairCandidatesV39(
 
 /* ========================================
    Pair候補比較
-
-   Battle生成中のガイド。
-
-   Round全体では後から
-   別途Schedule評価する。
 ======================================== */
 
-function comparePickupPairChoiceV39(
+function comparePickupPairChoiceV40(
   a,
   b
 ) {
-
-  /*
-    前Round未出場者を優先
-  */
 
   if (
     a.previousWaitingBonus !==
@@ -1488,10 +1795,6 @@ function comparePickupPairChoiceV39(
   }
 
 
-  /*
-    今Round未出場者を優先
-  */
-
   if (
     a.uncoveredBonus !==
     b.uncoveredBonus
@@ -1504,10 +1807,6 @@ function comparePickupPairChoiceV39(
     );
   }
 
-
-  /*
-    公平性
-  */
 
   if (
     a.projectedFairTotal !==
@@ -1522,10 +1821,6 @@ function comparePickupPairChoiceV39(
   }
 
 
-  /*
-    同一Round同Pairは強く回避
-  */
-
   if (
     a.sameRoundPair !==
     b.sameRoundPair
@@ -1539,10 +1834,6 @@ function comparePickupPairChoiceV39(
   }
 
 
-  /*
-    未成立Pair優先
-  */
-
   if (
     a.existingPair !==
     b.existingPair
@@ -1555,10 +1846,6 @@ function comparePickupPairChoiceV39(
     );
   }
 
-
-  /*
-    直前Round同Pair回避
-  */
 
   if (
     a.previousRoundPair !==
@@ -1586,11 +1873,6 @@ function comparePickupPairChoiceV39(
   }
 
 
-  /*
-    Pair関連を優先した後に
-    Round境界連続回避。
-  */
-
   if (
     a.boundaryOverlap !==
     b.boundaryOverlap
@@ -1603,10 +1885,6 @@ function comparePickupPairChoiceV39(
     );
   }
 
-
-  /*
-    同一Round内連続回避。
-  */
 
   if (
     a.adjacentOverlap !==
@@ -1630,18 +1908,18 @@ function comparePickupPairChoiceV39(
 
 
 /* ========================================
-   Battle単体評価
+   Battle評価
 ======================================== */
 
-function scorePickupBattleV39(
+function scorePickupBattleV40(
   battle,
   battleIndex,
   roundAppearances,
   roundPairKeys,
   previousBattleDancerIds,
   previousFinalIds,
-  previousRoundPairKeys,
-  previousWaitingIds
+  previousWaitingIds,
+  pairMetricCache
 ) {
 
   let previousWaitingUsed =
@@ -1681,56 +1959,47 @@ function scorePickupBattleV39(
 
 
   battle.pairs.forEach(
-    function (pair) {
+    function (
+      pair
+    ) {
 
-      const pairKey =
-        getHistoryKey(
+      const metric =
+        getPickupPairMetricV40(
           pair.leader,
-          pair.follower
-        );
-
-
-      const historyCount =
-        getPairHistoryCount(
-          pair.leader,
-          pair.follower
+          pair.follower,
+          pairMetricCache
         );
 
 
       if (
         roundPairKeys.has(
-          pairKey
+          metric.pairKey
         )
       ) {
+
         sameRoundPairRepeats++;
       }
 
 
-      if (
-        historyCount > 0
-      ) {
-        existingPairCount++;
-      }
+      existingPairCount +=
+        metric.existingPair;
 
 
-      if (
-        previousRoundPairKeys.has(
-          pairKey
-        )
-      ) {
-        previousRoundPairCount++;
-      }
+      previousRoundPairCount +=
+        metric.previousRoundPair;
 
 
       historyTotal +=
-        historyCount;
+        metric.historyCount;
 
 
       [
         pair.leader,
         pair.follower
       ].forEach(
-        function (participant) {
+        function (
+          participant
+        ) {
 
           const id =
             String(
@@ -1751,6 +2020,7 @@ function scorePickupBattleV39(
             &&
             roundCount === 0
           ) {
+
             previousWaitingUsed++;
           }
 
@@ -1758,6 +2028,7 @@ function scorePickupBattleV39(
           if (
             roundCount === 0
           ) {
+
             uncoveredUsed++;
           }
 
@@ -1777,6 +2048,7 @@ function scorePickupBattleV39(
               id
             )
           ) {
+
             boundaryOverlap++;
           }
 
@@ -1786,6 +2058,7 @@ function scorePickupBattleV39(
               id
             )
           ) {
+
             adjacentOverlap++;
           }
         }
@@ -1830,10 +2103,10 @@ function scorePickupBattleV39(
 
 
 /* ========================================
-   Battle候補比較
+   Battle比較
 ======================================== */
 
-function comparePickupBattleScoresV39(
+function comparePickupBattleScoresV40(
   a,
   b
 ) {
@@ -1967,12 +2240,13 @@ function comparePickupBattleScoresV39(
    Round全体評価
 ======================================== */
 
-function scorePickupScheduleV39(
+function scorePickupScheduleV40(
   battles,
   danceParticipants,
   previousFinalIds,
   previousRoundPairKeys,
-  previousWaitingIds
+  previousWaitingIds,
+  pairMetricCache
 ) {
 
   const appearanceCounts =
@@ -1980,7 +2254,9 @@ function scorePickupScheduleV39(
 
 
   danceParticipants.forEach(
-    function (participant) {
+    function (
+      participant
+    ) {
 
       appearanceCounts.set(
         String(
@@ -2031,57 +2307,47 @@ function scorePickupScheduleV39(
 
 
       battle.pairs.forEach(
-        function (pair) {
+        function (
+          pair
+        ) {
 
-          const key =
-            getHistoryKey(
+          const metric =
+            getPickupPairMetricV40(
               pair.leader,
-              pair.follower
+              pair.follower,
+              pairMetricCache
             );
 
 
           usedPairCounts.set(
-            key,
+            metric.pairKey,
             (
               usedPairCounts.get(
-                key
+                metric.pairKey
               ) || 0
             ) + 1
           );
 
 
-          const historyCount =
-            getPairHistoryCount(
-              pair.leader,
-              pair.follower
-            );
+          existingPairCount +=
+            metric.existingPair;
 
 
-          if (
-            historyCount > 0
-          ) {
-            existingPairCount++;
-          }
-
-
-          if (
-            previousRoundPairKeys.has(
-              key
-            )
-          ) {
-            previousRoundPairCount++;
-          }
+          previousRoundPairCount +=
+            metric.previousRoundPair;
 
 
           historyTotal +=
-            historyCount;
+            metric.historyCount;
 
 
           [
             pair.leader,
             pair.follower
           ].forEach(
-            function (participant) {
+            function (
+              participant
+            ) {
 
               const id =
                 String(
@@ -2111,6 +2377,7 @@ function scorePickupScheduleV39(
                   id
                 )
               ) {
+
                 boundaryOverlap++;
               }
 
@@ -2122,6 +2389,7 @@ function scorePickupScheduleV39(
                   id
                 )
               ) {
+
                 adjacentOverlap++;
               }
             }
@@ -2149,7 +2417,9 @@ function scorePickupScheduleV39(
 
 
   danceParticipants.forEach(
-    function (participant) {
+    function (
+      participant
+    ) {
 
       const id =
         String(
@@ -2170,6 +2440,7 @@ function scorePickupScheduleV39(
         &&
         appearances === 0
       ) {
+
         previousWaitingMissed++;
       }
 
@@ -2177,6 +2448,7 @@ function scorePickupScheduleV39(
       if (
         appearances === 0
       ) {
+
         missedParticipants++;
       }
 
@@ -2232,7 +2504,9 @@ function scorePickupScheduleV39(
 
 
     projectedCounts.forEach(
-      function (value) {
+      function (
+        value
+      ) {
 
         fairnessTotalDeviation +=
           Math.abs(
@@ -2249,7 +2523,9 @@ function scorePickupScheduleV39(
 
 
   usedPairCounts.forEach(
-    function (count) {
+    function (
+      count
+    ) {
 
       if (
         count > 1
@@ -2301,22 +2577,12 @@ function scorePickupScheduleV39(
 
 
 /* ========================================
-   Round全体候補比較
+   Round比較
 
-   今回合意した優先順位。
-
-   1. 前Round未出場者
-   2. 今Round全員最低1回
-   3. Dance公平性
-   4. 同一Round同Pair
-   5. 未成立Pair
-   6. 直前Round同Pair
-   7. Pair履歴回数
-   8. 前Round最後→次Round最初
-   9. 同一Round連続Dance
+   v39と優先順位は同じ。
 ======================================== */
 
-function comparePickupScheduleScoresV39(
+function comparePickupScheduleScoresV40(
   a,
   b
 ) {
@@ -2460,10 +2726,10 @@ function comparePickupScheduleScoresV39(
 
 
 /* ========================================
-   Judge選定
+   Judge
 ======================================== */
 
-function selectPickupJudgesV39(
+function selectPickupJudgesV40(
   battle,
   requestedCount,
   avoidIds = new Set()
@@ -2474,7 +2740,9 @@ function selectPickupJudgesV39(
 
 
   battle.pairs.forEach(
-    function (pair) {
+    function (
+      pair
+    ) {
 
       dancerIds.add(
         String(
@@ -2494,17 +2762,15 @@ function selectPickupJudgesV39(
 
   const allCandidates =
     participants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           participant.active !== false
-
           &&
-
           participant.judgeAvailable
-
           &&
-
           !dancerIds.has(
             String(
               participant.id
@@ -2518,6 +2784,7 @@ function selectPickupJudgesV39(
   if (
     allCandidates.length === 0
   ) {
+
     return [];
   }
 
@@ -2531,7 +2798,9 @@ function selectPickupJudgesV39(
 
   const preferredCandidates =
     allCandidates.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           !avoidIds.has(
@@ -2567,7 +2836,9 @@ function selectPickupJudgesV39(
 
 
   combinations.forEach(
-    function (combination) {
+    function (
+      combination
+    ) {
 
       const score =
         getJudgeCombinationScore(
@@ -2621,7 +2892,7 @@ function selectPickupJudgesV39(
    Timekeeper
 ======================================== */
 
-function selectPickupTimekeeperV39(
+function selectPickupTimekeeperV40(
   battle,
   usedTimekeeperIds
 ) {
@@ -2631,7 +2902,9 @@ function selectPickupTimekeeperV39(
 
 
   battle.pairs.forEach(
-    function (pair) {
+    function (
+      pair
+    ) {
 
       dancerIds.add(
         String(
@@ -2652,7 +2925,9 @@ function selectPickupTimekeeperV39(
   const judgeIds =
     new Set(
       battle.judges.map(
-        function (judge) {
+        function (
+          judge
+        ) {
 
           return String(
             judge.id
@@ -2664,7 +2939,9 @@ function selectPickupTimekeeperV39(
 
   const idleCandidates =
     participants.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         const id =
           String(
@@ -2674,15 +2951,11 @@ function selectPickupTimekeeperV39(
 
         return (
           participant.active !== false
-
           &&
-
           !dancerIds.has(
             id
           )
-
           &&
-
           !judgeIds.has(
             id
           )
@@ -2695,23 +2968,18 @@ function selectPickupTimekeeperV39(
     idleCandidates.length > 0
   ) {
 
-    return selectFairPickupTimekeeperV39(
+    return selectFairPickupTimekeeperV40(
       idleCandidates,
       usedTimekeeperIds
     );
   }
 
 
-  /*
-    本当に候補がいない場合だけ
-    Judgeと兼任。
-  */
-
   if (
     battle.judges.length > 0
   ) {
 
-    return selectFairPickupTimekeeperV39(
+    return selectFairPickupTimekeeperV40(
       battle.judges,
       usedTimekeeperIds
     );
@@ -2722,22 +2990,26 @@ function selectPickupTimekeeperV39(
 }
 
 
-function selectFairPickupTimekeeperV39(
+function selectFairPickupTimekeeperV40(
   candidates,
   usedTimekeeperIds
 ) {
 
   if (
-    !candidates ||
+    !candidates
+    ||
     candidates.length === 0
   ) {
+
     return null;
   }
 
 
   const unused =
     candidates.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           !usedTimekeeperIds.has(
@@ -2761,7 +3033,9 @@ function selectFairPickupTimekeeperV39(
 
 
   pool.forEach(
-    function (participant) {
+    function (
+      participant
+    ) {
 
       minimumCount =
         Math.min(
@@ -2776,7 +3050,9 @@ function selectFairPickupTimekeeperV39(
 
   const best =
     pool.filter(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         return (
           getTimekeeperFairCount(
@@ -2796,10 +3072,10 @@ function selectFairPickupTimekeeperV39(
 
 
 /* ========================================
-   Pickup Round保存形式
+   保存
 ======================================== */
 
-function serializePickupRoundV39(
+function serializePickupRoundV40(
   battles,
   waitingParticipants,
   roundNumber,
@@ -2819,13 +3095,17 @@ function serializePickupRoundV39(
 
     battles:
       battles.map(
-        function (battle) {
+        function (
+          battle
+        ) {
 
           return {
 
             pairs:
               battle.pairs.map(
-                function (pair) {
+                function (
+                  pair
+                ) {
 
                   return {
 
@@ -2840,7 +3120,9 @@ function serializePickupRoundV39(
 
             judgeIds:
               battle.judges.map(
-                function (judge) {
+                function (
+                  judge
+                ) {
 
                   return judge.id;
                 }
@@ -2856,7 +3138,9 @@ function serializePickupRoundV39(
 
     waitingIds:
       waitingParticipants.map(
-        function (participant) {
+        function (
+          participant
+        ) {
 
           return participant.id;
         }
@@ -2866,14 +3150,8 @@ function serializePickupRoundV39(
 
 
 /* ========================================
-   前Round最終Battle参加者
-
-   v38既存関数を拡張。
-
-   Pickupの場合は
-   全PairのDancer + Judgeを対象。
-
-   対面の場合は既存関数を使用。
+   前Round最終Battle
+   Pickup対応
 ======================================== */
 
 const getPreviousFinalBattleParticipantIdsV38 =
@@ -2925,7 +3203,9 @@ getPreviousFinalBattleParticipantIds =
     ) {
 
       finalBattle.pairs.forEach(
-        function (pair) {
+        function (
+          pair
+        ) {
 
           if (
             pair.leaderId != null
@@ -2958,10 +3238,14 @@ getPreviousFinalBattleParticipantIds =
       finalBattle.judgeIds ||
       []
     ).forEach(
-      function (id) {
+      function (
+        id
+      ) {
 
         result.add(
-          String(id)
+          String(
+            id
+          )
         );
       }
     );
@@ -2972,11 +3256,8 @@ getPreviousFinalBattleParticipantIds =
 
 
 /* ========================================
-   直前Round Pair一覧
-
-   Pickup全Pairに対応。
-
-   対面方式の場合は既存v38を使用。
+   前Round Pair
+   Pickup対応
 ======================================== */
 
 const getPreviousRoundPairKeysV38 =
@@ -3014,19 +3295,24 @@ getPreviousRoundPairKeys =
 
 
     lastRoundData.battles.forEach(
-      function (battle) {
+      function (
+        battle
+      ) {
 
         (
           battle.pairs ||
           []
         ).forEach(
-          function (pair) {
+          function (
+            pair
+          ) {
 
             if (
               pair.leaderId == null
               ||
               pair.followerId == null
             ) {
+
               return;
             }
 
@@ -3048,8 +3334,7 @@ getPreviousRoundPairKeys =
 
 
 /* ========================================
-   Pair履歴v36
-   「今回のPair」Pickup対応
+   Pair履歴表示
 ======================================== */
 
 if (
@@ -3085,13 +3370,17 @@ if (
         lastRoundData.battles ||
         []
       ).forEach(
-        function (battle) {
+        function (
+          battle
+        ) {
 
           (
             battle.pairs ||
             []
           ).forEach(
-            function (pair) {
+            function (
+              pair
+            ) {
 
               const leader =
                 findParticipantById(
@@ -3106,9 +3395,11 @@ if (
 
 
               if (
-                !leader ||
+                !leader
+                ||
                 !follower
               ) {
+
                 return;
               }
 
@@ -3139,9 +3430,7 @@ if (
 
 
 /* ========================================
-   Pickup Round表示
-
-   対面方式は既存renderCurrentRoundを使用。
+   Round表示切替
 ======================================== */
 
 const renderCurrentRoundV38 =
@@ -3164,11 +3453,12 @@ renderCurrentRound =
     }
 
 
-    renderPickupCurrentRoundV39();
+    renderPickupCurrentRoundV40();
   };
 
 
-function renderPickupCurrentRoundV39() {
+function renderPickupCurrentRoundV40() {
+
   if (
     !lastRoundData
     ||
@@ -3179,7 +3469,9 @@ function renderPickupCurrentRoundV39() {
 
     roundResultCard
       .classList
-      .add("hidden");
+      .add(
+        "hidden"
+      );
 
     return;
   }
@@ -3190,7 +3482,9 @@ function renderPickupCurrentRoundV39() {
 
 
   lastRoundData.battles.forEach(
-    function (storedBattle) {
+    function (
+      storedBattle
+    ) {
 
       const pairs =
         [];
@@ -3200,7 +3494,9 @@ function renderPickupCurrentRoundV39() {
         storedBattle.pairs ||
         []
       ).forEach(
-        function (storedPair) {
+        function (
+          storedPair
+        ) {
 
           const leader =
             findParticipantById(
@@ -3215,7 +3511,8 @@ function renderPickupCurrentRoundV39() {
 
 
           if (
-            leader &&
+            leader
+            &&
             follower
           ) {
 
@@ -3235,6 +3532,7 @@ function renderPickupCurrentRoundV39() {
       if (
         pairs.length === 0
       ) {
+
         return;
       }
 
@@ -3245,7 +3543,9 @@ function renderPickupCurrentRoundV39() {
           []
         )
         .map(
-          function (id) {
+          function (
+            id
+          ) {
 
             return (
               findParticipantById(
@@ -3254,7 +3554,9 @@ function renderPickupCurrentRoundV39() {
             );
           }
         )
-        .filter(Boolean);
+        .filter(
+          Boolean
+        );
 
 
       const timekeeper =
@@ -3286,7 +3588,9 @@ function renderPickupCurrentRoundV39() {
 
     roundResultCard
       .classList
-      .add("hidden");
+      .add(
+        "hidden"
+      );
 
     return;
   }
@@ -3298,7 +3602,9 @@ function renderPickupCurrentRoundV39() {
       []
     )
     .map(
-      function (id) {
+      function (
+        id
+      ) {
 
         return (
           findParticipantById(
@@ -3307,10 +3613,12 @@ function renderPickupCurrentRoundV39() {
         );
       }
     )
-    .filter(Boolean);
+    .filter(
+      Boolean
+    );
 
 
-  renderPickupRoundV39(
+  renderPickupRoundV40(
     battles,
     waiting,
     lastRoundData.roundNumber,
@@ -3320,10 +3628,10 @@ function renderPickupCurrentRoundV39() {
 
 
 /* ========================================
-   Pickup Round描画
+   Pickup表示
 ======================================== */
 
-function renderPickupRoundV39(
+function renderPickupRoundV40(
   battles,
   waiting,
   roundNumber,
@@ -3332,7 +3640,9 @@ function renderPickupRoundV39(
 
   roundResultCard
     .classList
-    .remove("hidden");
+    .remove(
+      "hidden"
+    );
 
 
   roundTitle.textContent =
@@ -3396,7 +3706,9 @@ function renderPickupRoundV39(
 
 
       battle.pairs.forEach(
-        function (pair) {
+        function (
+          pair
+        ) {
 
           dancerIds.push(
             String(
@@ -3416,7 +3728,9 @@ function renderPickupRoundV39(
 
       const judgeIds =
         battle.judges.map(
-          function (judge) {
+          function (
+            judge
+          ) {
 
             return String(
               judge.id
@@ -3456,7 +3770,9 @@ function renderPickupRoundV39(
           currentId;
 
 
-      if (isMyDance) {
+      if (
+        isMyDance
+      ) {
 
         personalDanceBattles.push(
           battleNumber
@@ -3464,7 +3780,9 @@ function renderPickupRoundV39(
       }
 
 
-      if (isMyJudge) {
+      if (
+        isMyJudge
+      ) {
 
         personalJudgeBattles.push(
           battleNumber
@@ -3472,7 +3790,9 @@ function renderPickupRoundV39(
       }
 
 
-      if (isMyTimekeeper) {
+      if (
+        isMyTimekeeper
+      ) {
 
         personalTimekeeperBattles.push(
           battleNumber
@@ -3557,7 +3877,9 @@ function renderPickupRoundV39(
           [];
 
 
-        if (isMyDance) {
+        if (
+          isMyDance
+        ) {
 
           labels.push(
             "YOUR BATTLE"
@@ -3565,7 +3887,9 @@ function renderPickupRoundV39(
         }
 
 
-        if (isMyJudge) {
+        if (
+          isMyJudge
+        ) {
 
           labels.push(
             "YOU JUDGE"
@@ -3573,7 +3897,9 @@ function renderPickupRoundV39(
         }
 
 
-        if (isMyTimekeeper) {
+        if (
+          isMyTimekeeper
+        ) {
 
           labels.push(
             "TIMEKEEP"
@@ -3638,10 +3964,6 @@ function renderPickupRoundV39(
     }
   );
 
-
-  /* =====================================
-     個人表示
-  ====================================== */
 
   if (
     currentParticipant
@@ -3711,19 +4033,19 @@ function renderPickupRoundV39(
 
     roundPersonalStatus
       .classList
-      .remove("hidden");
+      .remove(
+        "hidden"
+      );
 
   } else {
 
     roundPersonalStatus
       .classList
-      .add("hidden");
+      .add(
+        "hidden"
+      );
   }
 
-
-  /* =====================================
-     Dance未出場
-  ====================================== */
 
   waitingList.innerHTML =
     "";
@@ -3735,17 +4057,23 @@ function renderPickupRoundV39(
 
     waitingArea
       .classList
-      .add("hidden");
+      .add(
+        "hidden"
+      );
 
   } else {
 
     waitingArea
       .classList
-      .remove("hidden");
+      .remove(
+        "hidden"
+      );
 
 
     waiting.forEach(
-      function (participant) {
+      function (
+        participant
+      ) {
 
         const item =
           document.createElement(
