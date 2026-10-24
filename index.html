@@ -294,9 +294,80 @@
         Round生成
       </h2>
 
-      <p class="section-description">
-        出場回数・Pair履歴・対戦履歴・Judge/Timekeeper回数を考慮して生成します。
+
+      <!-- =====================================
+           v39 Battle方式
+      ====================================== -->
+
+      <label
+        class="field-label"
+        for="battleFormatSelect"
+      >
+        Battle方式
+      </label>
+
+      <select
+        id="battleFormatSelect"
+        class="existing-participant-select"
+      >
+        <option value="faceToFace">
+          対面方式
+        </option>
+
+        <option value="pickup">
+          ピックアップ方式
+        </option>
+      </select>
+
+
+      <p
+        id="roundFormatDescription"
+        class="section-description"
+      >
+        2Pairが対面する従来のBattle方式です。
       </p>
+
+
+      <div
+        id="pickupSettings"
+        class="hidden"
+      >
+
+        <label
+          class="field-label"
+          for="pickupPairCountSelect"
+        >
+          同時に踊るPair数
+        </label>
+
+        <select
+          id="pickupPairCountSelect"
+          class="existing-participant-select"
+        >
+
+          <option value="2">
+            2 Pair
+          </option>
+
+          <option value="3">
+            3 Pair
+          </option>
+
+          <option value="4">
+            4 Pair
+          </option>
+
+          <option value="5">
+            5 Pair
+          </option>
+
+        </select>
+
+        <p class="participation-note">
+          最後のBattleも同じPair数で実施します。端数が出る場合は、別Pairを作って再出場します。
+        </p>
+
+      </div>
 
 
       <button
@@ -309,7 +380,7 @@
 
 
       <div class="save-note">
-        Round・D/J/T回数・履歴はFirebaseへ保存されます。
+        Round・D/J/T回数・Pair履歴はFirebaseへ保存されます。
       </div>
 
 
@@ -443,7 +514,7 @@
       <div class="history-content">
 
         <p class="section-description">
-          同じRoleで最も多く対戦している相手を表示します。
+          対面方式で、同じRoleで最も多く対戦している相手を表示します。
         </p>
 
 
@@ -697,6 +768,8 @@
   <script src="round-logic-v38.js?v=38"></script>
 
   <script src="pair-history-v36.js?v=36"></script>
+
+  <script src="pickup-battle-v39.js?v=39"></script>
 
 </body>
 
