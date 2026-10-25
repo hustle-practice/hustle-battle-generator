@@ -1,14 +1,10 @@
 /* ========================================
    Hustle Battle Generator
    Pickup Battle v41
-   iPhone Timing Diagnostic
 
    v40の表示・保存・Judge・Timekeeper等は
    そのまま利用し、
    重いRound生成部分のみ差し替える。
-
-   今回は診断用として、
-   各処理時間を画面上にも表示する。
 
    優先順位
    ----------------------------------------
@@ -21,146 +17,6 @@
    7. 同一Round内連続Danceを最小化
    8. Judge / Timekeeper公平性
 ======================================== */
-
-
-/* ========================================
-   診断結果表示
-======================================== */
-
-function showPickupTimingV41(
-  preparationSeconds,
-  scheduleSeconds,
-  postProcessSeconds,
-  saveSeconds,
-  renderSeconds,
-  totalSeconds
-) {
-
-  let box =
-    document.getElementById(
-      "pickupTimingDiagnosticV41"
-    );
-
-
-  if (!box) {
-
-    box =
-      document.createElement(
-        "div"
-      );
-
-
-    box.id =
-      "pickupTimingDiagnosticV41";
-
-
-    box.style.position =
-      "fixed";
-
-    box.style.left =
-      "12px";
-
-    box.style.right =
-      "12px";
-
-    box.style.top =
-      "12px";
-
-    box.style.zIndex =
-      "99999";
-
-    box.style.background =
-      "rgba(20, 20, 20, 0.94)";
-
-    box.style.color =
-      "#ffffff";
-
-    box.style.padding =
-      "12px 14px";
-
-    box.style.borderRadius =
-      "12px";
-
-    box.style.boxShadow =
-      "0 4px 18px rgba(0, 0, 0, 0.28)";
-
-    box.style.fontSize =
-      "13px";
-
-    box.style.lineHeight =
-      "1.6";
-
-    box.style.fontFamily =
-      "system-ui, -apple-system, sans-serif";
-
-    box.style.maxWidth =
-      "600px";
-
-    box.style.margin =
-      "0 auto";
-
-
-    document.body.appendChild(
-      box
-    );
-  }
-
-
-  box.innerHTML =
-    "<strong>Pickup生成時間</strong><br>"
-    +
-    "① 事前準備："
-    +
-    preparationSeconds
-    +
-    "秒<br>"
-    +
-    "② 組み合わせ生成："
-    +
-    scheduleSeconds
-    +
-    "秒<br>"
-    +
-    "③ D/J/T・履歴更新："
-    +
-    postProcessSeconds
-    +
-    "秒<br>"
-    +
-    "④ Firebase保存："
-    +
-    saveSeconds
-    +
-    "秒<br>"
-    +
-    "⑤ 画面描画："
-    +
-    renderSeconds
-    +
-    "秒<br>"
-    +
-    "<strong>★ 合計："
-    +
-    totalSeconds
-    +
-    "秒</strong>"
-    +
-    "<br>"
-    +
-    "<button "
-    +
-    "type=\"button\" "
-    +
-    "style=\"margin-top:8px;padding:6px 12px;border:0;border-radius:8px;cursor:pointer;\" "
-    +
-    "onclick=\"document.getElementById('pickupTimingDiagnosticV41').remove()\""
-    +
-    ">"
-    +
-    "閉じる"
-    +
-    "</button>";
-}
 
 
 /* ========================================
@@ -202,14 +58,9 @@ async function generateRoundByFormatV41() {
 
 /* ========================================
    Pickup Round生成 v41
-   ＋処理時間計測
 ======================================== */
 
 async function generatePickupRoundV41() {
-
-  const totalStart =
-    performance.now();
-
 
   if (
     !isCurrentUserAdmin
@@ -236,10 +87,6 @@ async function generatePickupRoundV41() {
 
     return;
   }
-
-
-  const preparationStart =
-    performance.now();
 
 
   const activeDanceParticipants =
@@ -374,26 +221,6 @@ async function generatePickupRoundV41() {
     );
 
 
-  const preparationSeconds =
-    (
-      (
-        performance.now()
-        -
-        preparationStart
-      )
-      /
-      1000
-    ).toFixed(2);
-
-
-  /* =====================================
-     Schedule生成
-  ====================================== */
-
-  const scheduleStart =
-    performance.now();
-
-
   const schedule =
     createPickupScheduleV41(
       activeDanceParticipants,
@@ -404,18 +231,6 @@ async function generatePickupRoundV41() {
       previousWaitingIds,
       pairMetricCache
     );
-
-
-  const scheduleSeconds =
-    (
-      (
-        performance.now()
-        -
-        scheduleStart
-      )
-      /
-      1000
-    ).toFixed(2);
 
 
   if (
@@ -436,12 +251,8 @@ async function generatePickupRoundV41() {
 
 
   /* =====================================
-     Dance / Pair履歴 / Judge / TK
+     Dance / Pair履歴
   ====================================== */
-
-  const postProcessStart =
-    performance.now();
-
 
   const roundDanceCounts =
     new Map();
@@ -666,6 +477,10 @@ async function generatePickupRoundV41() {
   );
 
 
+  /* =====================================
+     今回Dance未出場
+  ====================================== */
+
   const waitingParticipants =
     activeDanceParticipants.filter(
       function (
@@ -700,134 +515,10 @@ async function generatePickupRoundV41() {
   syncStatsFromParticipants();
 
 
-  const postProcessSeconds =
-    (
-      (
-        performance.now()
-        -
-        postProcessStart
-      )
-      /
-      1000
-    ).toFixed(2);
-
-
-  /* =====================================
-     Firebase保存
-  ====================================== */
-
-  const saveStart =
-    performance.now();
-
-
   await saveEventState();
 
 
-  const saveSeconds =
-    (
-      (
-        performance.now()
-        -
-        saveStart
-      )
-      /
-      1000
-    ).toFixed(2);
-
-
-  /* =====================================
-     描画
-  ====================================== */
-
-  const renderStart =
-    performance.now();
-
-
   renderAll();
-
-
-  const renderSeconds =
-    (
-      (
-        performance.now()
-        -
-        renderStart
-      )
-      /
-      1000
-    ).toFixed(2);
-
-
-  const totalSeconds =
-    (
-      (
-        performance.now()
-        -
-        totalStart
-      )
-      /
-      1000
-    ).toFixed(2);
-
-
-  /* =====================================
-     Consoleにも残す
-  ====================================== */
-
-  console.log(
-    "① 事前準備:",
-    preparationSeconds,
-    "秒"
-  );
-
-
-  console.log(
-    "② Pickup組み合わせ生成:",
-    scheduleSeconds,
-    "秒"
-  );
-
-
-  console.log(
-    "③ D/J/T・履歴・統計更新:",
-    postProcessSeconds,
-    "秒"
-  );
-
-
-  console.log(
-    "④ Firebase保存:",
-    saveSeconds,
-    "秒"
-  );
-
-
-  console.log(
-    "⑤ 画面描画:",
-    renderSeconds,
-    "秒"
-  );
-
-
-  console.log(
-    "★ 合計:",
-    totalSeconds,
-    "秒"
-  );
-
-
-  /* =====================================
-     iPhone用 画面表示
-  ====================================== */
-
-  showPickupTimingV41(
-    preparationSeconds,
-    scheduleSeconds,
-    postProcessSeconds,
-    saveSeconds,
-    renderSeconds,
-    totalSeconds
-  );
 }
 
 
