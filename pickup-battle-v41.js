@@ -1,3 +1,4 @@
+
 /* ========================================
    Hustle Battle Generator
    Pickup Battle v41
@@ -6,16 +7,18 @@
    そのまま利用し、
    重いRound生成部分のみ差し替える。
 
-   優先順位
+   優先順位（v41の評価調整）
    ----------------------------------------
    1. 前Round未出場者を次Roundで最低1回
-   2. Dance出場回数の公平性
-   3. 同一Round同Pair回避
-   4. 未成立Pair優先
-   5. 成立済Pairなら履歴回数が少ない
-   6. 前Round最後→次Round最初を最小化
-   7. 同一Round内連続Danceを最小化
-   8. Judge / Timekeeper公平性
+   2. Dance参加者の未出場をできるだけ減らす
+   3. Round全体のDance公平性の最大差を抑える
+   4. 同一Round同Pair回避
+   5. 未成立Pair優先
+   6. 成立済Pairなら履歴回数が少ない
+   7. Dance公平性の細かな偏差を調整
+   8. 前Round最後→次Round最初を最小化
+   9. 同一Round内連続Danceを最小化
+   10. Judge / Timekeeper公平性
 ======================================== */
 
 
@@ -656,7 +659,7 @@ function createPickupScheduleV41(
       if (
         bestScore === null
         ||
-        comparePickupScheduleScoresV40(
+        comparePickupScheduleScoresV41(
           score,
           bestScore
         ) < 0
@@ -674,6 +677,93 @@ function createPickupScheduleV41(
 
 
   return bestSchedule;
+}
+
+
+/* ========================================
+   最終Round評価 v41
+
+   v40のスコア算出式は変更しない。
+   最大Dance回数差を維持しつつ、
+   Pair履歴を細かな偏差より先に比較する。
+======================================== */
+
+function comparePickupScheduleScoresV41(
+  a,
+  b
+) {
+
+  if (
+    a.previousWaitingMissed !==
+    b.previousWaitingMissed
+  ) {
+    return a.previousWaitingMissed - b.previousWaitingMissed;
+  }
+
+  if (
+    a.missedParticipants !==
+    b.missedParticipants
+  ) {
+    return a.missedParticipants - b.missedParticipants;
+  }
+
+  if (
+    a.fairnessSpread !==
+    b.fairnessSpread
+  ) {
+    return a.fairnessSpread - b.fairnessSpread;
+  }
+
+  if (
+    a.sameRoundPairRepeats !==
+    b.sameRoundPairRepeats
+  ) {
+    return a.sameRoundPairRepeats - b.sameRoundPairRepeats;
+  }
+
+  if (
+    a.existingPairCount !==
+    b.existingPairCount
+  ) {
+    return a.existingPairCount - b.existingPairCount;
+  }
+
+  if (
+    a.previousRoundPairCount !==
+    b.previousRoundPairCount
+  ) {
+    return a.previousRoundPairCount - b.previousRoundPairCount;
+  }
+
+  if (
+    a.historyTotal !==
+    b.historyTotal
+  ) {
+    return a.historyTotal - b.historyTotal;
+  }
+
+  if (
+    a.fairnessTotalDeviation !==
+    b.fairnessTotalDeviation
+  ) {
+    return a.fairnessTotalDeviation - b.fairnessTotalDeviation;
+  }
+
+  if (
+    a.boundaryOverlap !==
+    b.boundaryOverlap
+  ) {
+    return a.boundaryOverlap - b.boundaryOverlap;
+  }
+
+  if (
+    a.adjacentOverlap !==
+    b.adjacentOverlap
+  ) {
+    return a.adjacentOverlap - b.adjacentOverlap;
+  }
+
+  return a.randomTie - b.randomTie;
 }
 
 
@@ -1271,18 +1361,6 @@ function compareSinglePickupPairCandidateV41(
   }
 
 
-  if (
-    a.fairnessCost !==
-    b.fairnessCost
-  ) {
-
-    return (
-      a.fairnessCost
-      -
-      b.fairnessCost
-    );
-  }
-
 
   if (
     a.sameRoundPair !==
@@ -1332,6 +1410,18 @@ function compareSinglePickupPairCandidateV41(
       a.historyCount
       -
       b.historyCount
+    );
+  }
+
+  if (
+    a.fairnessCost !==
+    b.fairnessCost
+  ) {
+
+    return (
+      a.fairnessCost
+      -
+      b.fairnessCost
     );
   }
 
@@ -1502,18 +1592,6 @@ function comparePickupPairBeamStateV41(
   }
 
 
-  if (
-    a.fairnessCost !==
-    b.fairnessCost
-  ) {
-
-    return (
-      a.fairnessCost
-      -
-      b.fairnessCost
-    );
-  }
-
 
   if (
     a.sameRoundPairRepeats !==
@@ -1563,6 +1641,18 @@ function comparePickupPairBeamStateV41(
       a.historyTotal
       -
       b.historyTotal
+    );
+  }
+
+  if (
+    a.fairnessCost !==
+    b.fairnessCost
+  ) {
+
+    return (
+      a.fairnessCost
+      -
+      b.fairnessCost
     );
   }
 
@@ -1775,18 +1865,6 @@ function comparePartialPickupRoundStateV41(
   }
 
 
-  if (
-    scoreA.fairnessDeviation !==
-    scoreB.fairnessDeviation
-  ) {
-
-    return (
-      scoreA.fairnessDeviation
-      -
-      scoreB.fairnessDeviation
-    );
-  }
-
 
   if (
     scoreA.sameRoundPairRepeats !==
@@ -1823,6 +1901,18 @@ function comparePartialPickupRoundStateV41(
       scoreA.historyTotal
       -
       scoreB.historyTotal
+    );
+  }
+
+  if (
+    scoreA.fairnessDeviation !==
+    scoreB.fairnessDeviation
+  ) {
+
+    return (
+      scoreA.fairnessDeviation
+      -
+      scoreB.fairnessDeviation
     );
   }
 
