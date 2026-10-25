@@ -23,6 +23,13 @@
 
 
 /* ========================================
+   Pickup再探索の診断情報
+   生成方式や探索結果の判定には使用しない。
+======================================== */
+let pickupRecoveryDiagnosticV41 = null;
+
+
+/* ========================================
    v40 Generateイベントを解除し、
    v41へ切替
 ======================================== */
@@ -64,6 +71,8 @@ async function generateRoundByFormatV41() {
 ======================================== */
 
 async function generatePickupRoundV41() {
+
+  pickupRecoveryDiagnosticV41 = null;
 
   if (
     !isCurrentUserAdmin
@@ -522,6 +531,32 @@ async function generatePickupRoundV41() {
 
 
   renderAll();
+
+  // 再成立が残ったRoundのみ、スマートフォンで読める診断を表示。
+  if (
+    pickupRecoveryDiagnosticV41 &&
+    (pickupRecoveryDiagnosticV41.repeatedAfter > 0 ||
+     pickupRecoveryDiagnosticV41.sameRoundAfter > 0)
+  ) {
+    const d = pickupRecoveryDiagnosticV41;
+    alert(
+      "Pickup診断（Round " + currentRound + "）" +
+      "\n成立済Pair再使用: " + d.repeatedAfter + "組" +
+      "\n同RoundのPair重複: " + d.sameRoundAfter + "組" +
+      "\n未成立Pair: " + d.freshCount + "組" +
+      "（今回必要: " + d.needed + "組）" +
+      "\n理由: " + d.reason +
+      "\nBattle候補: " + d.options + "件" +
+      "\n探索: " + d.states + "回" +
+      "\n完成案: " + d.completed + "件" +
+      "\n完成案の条件不一致: " + d.rejectedFinalConstraints + "件" +
+      "\n棄却（連続/境界/Judge）: " +
+      d.rejectedAdjacent + "/" +
+      d.rejectedBoundary + "/" +
+      d.rejectedJudge +
+      "\nこの画面を撮影して送ってください。"
+    );
+  }
 }
 
 
@@ -1317,7 +1352,7 @@ function getTopPairCandidatesForBeamV41(
 
         if (
           top.length >
-        limit
+          limit
         ) {
 
           top.pop();
@@ -2622,7 +2657,28 @@ function recoverPickupUnpairedScheduleV41(
   previousWaitingIds,
   pairMetricCache
 ) {
-  if (!schedule || schedule.length === 0) return schedule;
+  // 実行のたびにリセット。旧診断結果が残らないようにする。
+  pickupRecoveryDiagnosticV41 = {
+    reason: "未実行",
+    repeatedBefore: 0,
+    repeatedAfter: 0,
+    sameRoundAfter: 0,
+    freshCount: 0,
+    needed: 0,
+    options: 0,
+    states: 0,
+    rejectedAdjacent: 0,
+    rejectedBoundary: 0,
+    rejectedJudge: 0,
+    completed: 0,
+    rejectedFinalConstraints: 0
+  };
+  const diagnosis = pickupRecoveryDiagnosticV41;
+
+  if (!schedule || schedule.length === 0) {
+    diagnosis.reason = "生成データなし";
+    return schedule;
+  }
 
   const original = scorePickupScheduleV40(
     schedule,
@@ -2633,10 +2689,18 @@ function recoverPickupUnpairedScheduleV41(
     pairMetricCache
   );
 
+  diagnosis.repeatedBefore = original.existingPairCount;
+  diagnosis.repeatedAfter = original.existingPairCount;
+  diagnosis.sameRoundAfter = original.sameRoundPairRepeats;
+
   if (original.existingPairCount === 0 &&
-      original.sameRoundPairRepeats === 0) return schedule;
+      original.sameRoundPairRepeats === 0) {
+    diagnosis.reason = "再成立なし";
+    return schedule;
+  }
 
   const needed = schedule.length * pairCount;
+  diagnosis.needed = needed;
   const freshPairs = [];
 
   danceParticipants.forEach(leader => {
@@ -2656,8 +2720,15 @@ function recoverPickupUnpairedScheduleV41(
   // 多数の未成立Pairが残る段階は既存Beam Searchを優先。
   // 終盤の選択肢が少ない場合だけ、探索範囲を限定して検証する。
   const MAX_FRESH = pairCount <= 2 ? 24 : 18;
-  if (freshPairs.length < needed ||
-      freshPairs.length > MAX_FRESH) return schedule;
+  diagnosis.freshCount = freshPairs.length;
+  if (freshPairs.length < needed) {
+    diagnosis.reason = "未成立Pairが必要数より少ない";
+    return schedule;
+  }
+  if (freshPairs.length > MAX_FRESH) {
+    diagnosis.reason = "未成立Pair多数のため再探索対象外";
+    return schedule;
+  }
 
   const originalJudgeCounts = schedule.map(
     battle => getPickupAvailableJudgeCountV41(battle)
@@ -2693,7 +2764,11 @@ function recoverPickupUnpairedScheduleV41(
   }
 
   buildBattleOptions(0, [], new Set(), 0);
-  if (!options.length) return schedule;
+  diagnosis.options = options.length;
+  if (!options.length) {
+    diagnosis.reason = "Battle候補を作成できない";
+    return schedule;
+  }
 
   const MAX_STATES = 25000;
   let states = 0;
@@ -2703,6 +2778,7 @@ function recoverPickupUnpairedScheduleV41(
   function search(battleIndex, usedEdges, previousIds, adjacentCount, boundaryCount) {
     if (found || states >= MAX_STATES) return;
     if (battleIndex === schedule.length) {
+      diagnosis.completed++;
       const candidate = partial.map(option => ({
         pairs: option.pairs.map(pair => ({
           leader: pair.leader,
@@ -2727,7 +2803,10 @@ function recoverPickupUnpairedScheduleV41(
           result.sameRoundPairRepeats > original.sameRoundPairRepeats ||
           result.existingPairCount >= original.existingPairCount ||
           result.boundaryOverlap > original.boundaryOverlap ||
-          result.adjacentOverlap > original.adjacentOverlap) return;
+          result.adjacentOverlap > original.adjacentOverlap) {
+        diagnosis.rejectedFinalConstraints++;
+        return;
+      }
 
       for (let i = 0; i < candidate.length; i++) {
         if (getPickupAvailableJudgeCountV41(candidate[i]) <
@@ -2748,7 +2827,10 @@ function recoverPickupUnpairedScheduleV41(
           if (previousIds.has(id)) nextAdjacent++;
         }
       }
-      if (nextAdjacent > original.adjacentOverlap) continue;
+      if (nextAdjacent > original.adjacentOverlap) {
+        diagnosis.rejectedAdjacent++;
+        continue;
+      }
 
       let nextBoundary = boundaryCount;
       if (battleIndex === 0) {
@@ -2756,11 +2838,17 @@ function recoverPickupUnpairedScheduleV41(
           if (previousFinalIds.has(id)) nextBoundary++;
         }
       }
-      if (nextBoundary > original.boundaryOverlap) continue;
+      if (nextBoundary > original.boundaryOverlap) {
+        diagnosis.rejectedBoundary++;
+        continue;
+      }
 
       const preview = {pairs: option.pairs};
       if (getPickupAvailableJudgeCountV41(preview) <
-          originalJudgeCounts[battleIndex]) continue;
+          originalJudgeCounts[battleIndex]) {
+        diagnosis.rejectedJudge++;
+        continue;
+      }
 
       partial.push(option);
       search(
@@ -2776,5 +2864,17 @@ function recoverPickupUnpairedScheduleV41(
   }
 
   search(0, 0, null, 0, 0);
+  diagnosis.states = states;
+  if (found) {
+    diagnosis.repeatedAfter = 0;
+    diagnosis.sameRoundAfter = 0;
+    diagnosis.reason = "未成立Pairのみで組み直し成功";
+  } else if (states >= MAX_STATES) {
+    diagnosis.reason = "探索25,000回の上限に到達";
+  } else if (options.length >= OPTION_LIMIT) {
+    diagnosis.reason = "Battle候補1,200件の上限に到達";
+  } else {
+    diagnosis.reason = "探索範囲内では条件に合う案なし";
+  }
   return found || schedule;
 }
