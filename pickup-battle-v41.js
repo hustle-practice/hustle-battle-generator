@@ -676,7 +676,11 @@ function createPickupScheduleV41(
   );
 
 
-  return bestSchedule;
+  return improvePickupPartnersV41(
+    bestSchedule,
+    pairMetricCache,
+    previousFinalIds
+  );
 }
 
 
@@ -2243,4 +2247,344 @@ function getPartialPickupRoundScoreV41(
     randomTie:
       Math.random()
   };
+}
+
+
+/* ========================================
+   Pickup Round再調整（出場回数を固定）
+
+   ・全員のDance回数とRole別回数を変更しない
+   ・Battle内の重複参加は禁止
+   ・元の連続出場/前Round境界を増やさない
+   ・Judge候補人数を各Battleで減らさない
+   ・履歴評価が厳密に良くなる場合のみ採用
+======================================== */
+
+function improvePickupPartnersV41(schedule, pairMetricCache, previousFinalIds) {
+  if (!schedule || schedule.length === 0) {
+    return schedule;
+  }
+
+  const original = scorePickupReassignmentV41(
+    schedule,
+    pairMetricCache,
+    previousFinalIds
+  );
+
+  const originalJudgeCounts = schedule.map(
+    battle => getPickupAvailableJudgeCountV41(battle)
+  );
+
+  if (
+    original.sameRoundPairRepeats === 0 &&
+    original.existingPairCount === 0
+  ) {
+    return schedule;
+  }
+
+  let current = schedule;
+  let currentScore = original;
+  const MAX_PASSES = 12;
+
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const swaps = getPickupRoleSwapsV41(current);
+    let best = null;
+    let bestScore = currentScore;
+
+    for (const swap of swaps) {
+      const candidate = swapPickupRoleParticipantsV41(
+        current,
+        swap
+      );
+
+      if (!candidate ||
+          !isPickupReassignmentSafeV41(
+            candidate,
+            original,
+            originalJudgeCounts,
+            swap,
+            previousFinalIds
+          )) {
+        continue;
+      }
+
+      const score = scorePickupReassignmentV41(
+        candidate,
+        pairMetricCache,
+        previousFinalIds
+      );
+
+      if (comparePickupPartnerHistoryV41(score, bestScore) < 0) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+
+    /*
+      単一の交換で改善できない場合は、
+      2回の交換をまとめて検証する。
+      途中の一時的な悪化は許容するが、
+      完成後の制約は元のRoundより悪化させない。
+    */
+    if (!best) {
+      for (const firstSwap of swaps) {
+        const intermediate =
+          swapPickupRoleParticipantsV41(
+            current,
+            firstSwap
+          );
+        if (!intermediate) {
+          continue;
+        }
+
+        for (const secondSwap of swaps) {
+          const candidate =
+            swapPickupRoleParticipantsV41(
+              intermediate,
+              secondSwap
+            );
+
+          if (!candidate ||
+              !isPickupReassignmentSafeV41(
+                candidate,
+                original,
+                originalJudgeCounts,
+                firstSwap,
+                previousFinalIds
+              ) ||
+              !isPickupReassignmentSafeV41(
+                candidate,
+                original,
+                originalJudgeCounts,
+                secondSwap,
+                previousFinalIds
+              )) {
+            continue;
+          }
+
+          const score =
+            scorePickupReassignmentV41(
+              candidate,
+              pairMetricCache,
+              previousFinalIds
+            );
+
+          if (
+            comparePickupPartnerHistoryV41(
+              score,
+              bestScore
+            ) < 0
+          ) {
+            best = candidate;
+            bestScore = score;
+          }
+        }
+      }
+    }
+
+    if (!best) {
+      break;
+    }
+
+    current = best;
+    currentScore = bestScore;
+  }
+
+  return current;
+}
+
+
+/* ========================================
+   Pairまたは出場Battleを交換する候補
+======================================== */
+
+function getPickupRoleSwapsV41(schedule) {
+  const positions = [];
+
+  schedule.forEach((battle, battleIndex) => {
+    battle.pairs.forEach((pair, pairIndex) => {
+      positions.push({battleIndex, pairIndex});
+    });
+  });
+
+  const swaps = [];
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      swaps.push({
+        first: positions[i],
+        second: positions[j],
+        role: "leader"
+      });
+      swaps.push({
+        first: positions[i],
+        second: positions[j],
+        role: "follower"
+      });
+    }
+  }
+  return swaps;
+}
+
+
+function swapPickupRoleParticipantsV41(schedule, swap) {
+  const {first, second, role} = swap;
+  const firstBattle = schedule[first.battleIndex];
+  const secondBattle = schedule[second.battleIndex];
+  const firstPerson = firstBattle.pairs[first.pairIndex][role];
+  const secondPerson = secondBattle.pairs[second.pairIndex][role];
+
+  if (String(firstPerson.id) === String(secondPerson.id)) {
+    return null;
+  }
+
+  const result = schedule.slice();
+  const cloneBattle = index => {
+    if (result[index] === schedule[index]) {
+      result[index] = {
+        ...schedule[index],
+        pairs: schedule[index].pairs.map(pair => ({...pair}))
+      };
+    }
+  };
+
+  cloneBattle(first.battleIndex);
+  cloneBattle(second.battleIndex);
+
+  result[first.battleIndex].pairs[first.pairIndex][role] = secondPerson;
+  result[second.battleIndex].pairs[second.pairIndex][role] = firstPerson;
+
+  const indices = new Set([first.battleIndex, second.battleIndex]);
+  for (const index of indices) {
+    const ids = [];
+    for (const pair of result[index].pairs) {
+      ids.push(String(pair.leader.id));
+      ids.push(String(pair.follower.id));
+    }
+    if (new Set(ids).size !== ids.length) {
+      return null;
+    }
+  }
+
+  return result;
+}
+
+
+/* ========================================
+   Judge候補の人数を減らさない
+======================================== */
+
+function getPickupAvailableJudgeCountV41(battle) {
+  const dancerIds = new Set();
+  battle.pairs.forEach(pair => {
+    dancerIds.add(String(pair.leader.id));
+    dancerIds.add(String(pair.follower.id));
+  });
+
+  return participants.filter(person =>
+    person.active !== false &&
+    person.judgeAvailable &&
+    !dancerIds.has(String(person.id))
+  ).length;
+}
+
+
+function isPickupReassignmentSafeV41(
+  candidate,
+  originalScore,
+  originalJudgeCounts,
+  swap,
+  previousFinalIds
+) {
+  const touched = new Set([
+    swap.first.battleIndex,
+    swap.second.battleIndex
+  ]);
+
+  for (const index of touched) {
+    if (getPickupAvailableJudgeCountV41(candidate[index]) <
+        originalJudgeCounts[index]) {
+      return false;
+    }
+  }
+
+  const score = scorePickupReassignmentV41(
+    candidate,
+    null,
+    previousFinalIds
+  );
+
+  return (
+    score.adjacentOverlap <= originalScore.adjacentOverlap &&
+    score.boundaryOverlap <= originalScore.boundaryOverlap
+  );
+}
+
+
+function scorePickupReassignmentV41(schedule, pairMetricCache, previousFinalIds) {
+  const keys = new Set();
+  const score = {
+    sameRoundPairRepeats: 0,
+    existingPairCount: 0,
+    previousRoundPairCount: 0,
+    historyTotal: 0,
+    adjacentOverlap: 0,
+    boundaryOverlap: 0
+  };
+  let previousIds = null;
+
+  schedule.forEach((battle, battleIndex) => {
+    const ids = new Set();
+    battle.pairs.forEach(pair => {
+      const metric = pairMetricCache
+        ? getPickupPairMetricV40(
+            pair.leader, pair.follower, pairMetricCache
+          )
+        : null;
+      if (metric && keys.has(metric.pairKey)) {
+        score.sameRoundPairRepeats++;
+      }
+      if (metric) {
+        keys.add(metric.pairKey);
+        score.existingPairCount += metric.existingPair;
+        score.previousRoundPairCount += metric.previousRoundPair;
+        score.historyTotal += metric.historyCount;
+      }
+      ids.add(String(pair.leader.id));
+      ids.add(String(pair.follower.id));
+    });
+
+    if (battleIndex === 0 && previousFinalIds) {
+      for (const id of ids) {
+        if (previousFinalIds.has(id)) {
+          score.boundaryOverlap++;
+        }
+      }
+    }
+
+    if (previousIds) {
+      for (const id of ids) {
+        if (previousIds.has(id)) {
+          score.adjacentOverlap++;
+        }
+      }
+    }
+    previousIds = ids;
+  });
+
+  return score;
+}
+
+
+function comparePickupPartnerHistoryV41(a, b) {
+  for (const key of [
+    'sameRoundPairRepeats',
+    'existingPairCount',
+    'previousRoundPairCount',
+    'historyTotal'
+  ]) {
+    if (a[key] !== b[key]) {
+      return a[key] - b[key];
+    }
+  }
+  return 0;
 }
