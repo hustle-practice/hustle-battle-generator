@@ -676,10 +676,20 @@ function createPickupScheduleV41(
   );
 
 
-  return improvePickupPartnersV41(
+  const repairedSchedule = improvePickupPartnersV41(
     bestSchedule,
     pairMetricCache,
     previousFinalIds
+  );
+
+  return recoverPickupUnpairedScheduleV41(
+    repairedSchedule,
+    danceParticipants,
+    pairCount,
+    previousFinalIds,
+    previousRoundPairKeys,
+    previousWaitingIds,
+    pairMetricCache
   );
 }
 
@@ -1307,7 +1317,7 @@ function getTopPairCandidatesForBeamV41(
 
         if (
           top.length >
-          limit
+        limit
         ) {
 
           top.pop();
@@ -2587,4 +2597,184 @@ function comparePickupPartnerHistoryV41(a, b) {
     }
   }
   return 0;
+}
+
+
+/* ========================================
+   未成立Pairのみの再構成（候補が少ない終盤だけ）
+
+   v41の通常生成・Pair交換で再成立が残った場合、
+   未成立Pairの組合せをRound単位で検証する。
+
+   ・2〜5Pair共通
+   ・Dance公平性の最大差、前Round未出場者救済を悪化させない
+   ・連続出場／Round境界／Judge候補数を悪化させない
+   ・探索上限を設定し、終わらなければ従来結果を返す
+   ・履歴保存、Judge/TK割当処理は変更しない
+======================================== */
+
+function recoverPickupUnpairedScheduleV41(
+  schedule,
+  danceParticipants,
+  pairCount,
+  previousFinalIds,
+  previousRoundPairKeys,
+  previousWaitingIds,
+  pairMetricCache
+) {
+  if (!schedule || schedule.length === 0) return schedule;
+
+  const original = scorePickupScheduleV40(
+    schedule,
+    danceParticipants,
+    previousFinalIds,
+    previousRoundPairKeys,
+    previousWaitingIds,
+    pairMetricCache
+  );
+
+  if (original.existingPairCount === 0 &&
+      original.sameRoundPairRepeats === 0) return schedule;
+
+  const needed = schedule.length * pairCount;
+  const freshPairs = [];
+
+  danceParticipants.forEach(leader => {
+    if (!canLeadV40(leader)) return;
+    danceParticipants.forEach(follower => {
+      if (!canFollowV40(follower) ||
+          String(leader.id) === String(follower.id)) return;
+      const metric = getPickupPairMetricV40(
+        leader, follower, pairMetricCache
+      );
+      if (metric.existingPair === 0) {
+        freshPairs.push({leader, follower});
+      }
+    });
+  });
+
+  // 多数の未成立Pairが残る段階は既存Beam Searchを優先。
+  // 終盤の選択肢が少ない場合だけ、探索範囲を限定して検証する。
+  const MAX_FRESH = pairCount <= 2 ? 24 : 18;
+  if (freshPairs.length < needed ||
+      freshPairs.length > MAX_FRESH) return schedule;
+
+  const originalJudgeCounts = schedule.map(
+    battle => getPickupAvailableJudgeCountV41(battle)
+  );
+
+  const options = [];
+  const OPTION_LIMIT = 1200;
+
+  function buildBattleOptions(from, chosen, ids, edgeBits) {
+    if (options.length >= OPTION_LIMIT) return;
+    if (chosen.length === pairCount) {
+      options.push({
+        pairs: chosen.slice(),
+        ids: new Set(ids),
+        edgeBits
+      });
+      return;
+    }
+    for (let i = from; i < freshPairs.length; i++) {
+      const pair = freshPairs[i];
+      const lid = String(pair.leader.id);
+      const fid = String(pair.follower.id);
+      if (ids.has(lid) || ids.has(fid)) continue;
+      ids.add(lid);
+      ids.add(fid);
+      chosen.push(pair);
+      buildBattleOptions(i + 1, chosen, ids, edgeBits | (1 << i));
+      chosen.pop();
+      ids.delete(lid);
+      ids.delete(fid);
+      if (options.length >= OPTION_LIMIT) break;
+    }
+  }
+
+  buildBattleOptions(0, [], new Set(), 0);
+  if (!options.length) return schedule;
+
+  const MAX_STATES = 25000;
+  let states = 0;
+  let found = null;
+  const partial = [];
+
+  function search(battleIndex, usedEdges, previousIds, adjacentCount, boundaryCount) {
+    if (found || states >= MAX_STATES) return;
+    if (battleIndex === schedule.length) {
+      const candidate = partial.map(option => ({
+        pairs: option.pairs.map(pair => ({
+          leader: pair.leader,
+          follower: pair.follower
+        })),
+        judges: [],
+        timekeeper: null
+      }));
+
+      const result = scorePickupScheduleV40(
+        candidate,
+        danceParticipants,
+        previousFinalIds,
+        previousRoundPairKeys,
+        previousWaitingIds,
+        pairMetricCache
+      );
+
+      if (result.previousWaitingMissed > original.previousWaitingMissed ||
+          result.missedParticipants > original.missedParticipants ||
+          result.fairnessSpread > original.fairnessSpread ||
+          result.sameRoundPairRepeats > original.sameRoundPairRepeats ||
+          result.existingPairCount >= original.existingPairCount ||
+          result.boundaryOverlap > original.boundaryOverlap ||
+          result.adjacentOverlap > original.adjacentOverlap) return;
+
+      for (let i = 0; i < candidate.length; i++) {
+        if (getPickupAvailableJudgeCountV41(candidate[i]) <
+            originalJudgeCounts[i]) return;
+      }
+
+      found = candidate;
+      return;
+    }
+
+    for (const option of options) {
+      if (++states > MAX_STATES) return;
+      if ((usedEdges & option.edgeBits) !== 0) continue;
+
+      let nextAdjacent = adjacentCount;
+      if (previousIds) {
+        for (const id of option.ids) {
+          if (previousIds.has(id)) nextAdjacent++;
+        }
+      }
+      if (nextAdjacent > original.adjacentOverlap) continue;
+
+      let nextBoundary = boundaryCount;
+      if (battleIndex === 0) {
+        for (const id of option.ids) {
+          if (previousFinalIds.has(id)) nextBoundary++;
+        }
+      }
+      if (nextBoundary > original.boundaryOverlap) continue;
+
+      const preview = {pairs: option.pairs};
+      if (getPickupAvailableJudgeCountV41(preview) <
+          originalJudgeCounts[battleIndex]) continue;
+
+      partial.push(option);
+      search(
+        battleIndex + 1,
+        usedEdges | option.edgeBits,
+        option.ids,
+        nextAdjacent,
+        nextBoundary
+      );
+      partial.pop();
+      if (found || states >= MAX_STATES) return;
+    }
+  }
+
+  search(0, 0, null, 0, 0);
+  return found || schedule;
 }
