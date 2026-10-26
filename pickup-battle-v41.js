@@ -532,31 +532,7 @@ async function generatePickupRoundV41() {
 
   renderAll();
 
-  // 再成立が残ったRoundのみ、スマートフォンで読める診断を表示。
-  if (
-    pickupRecoveryDiagnosticV41 &&
-    (pickupRecoveryDiagnosticV41.repeatedAfter > 0 ||
-     pickupRecoveryDiagnosticV41.sameRoundAfter > 0)
-  ) {
-    const d = pickupRecoveryDiagnosticV41;
-    alert(
-      "Pickup診断（Round " + currentRound + "）" +
-      "\n成立済Pair再使用: " + d.repeatedAfter + "組" +
-      "\n同RoundのPair重複: " + d.sameRoundAfter + "組" +
-      "\n未成立Pair: " + d.freshCount + "組" +
-      "（今回必要: " + d.needed + "組）" +
-      "\n理由: " + d.reason +
-      "\nBattle候補: " + d.options + "件" +
-      "\n探索: " + d.states + "回" +
-      "\n完成案: " + d.completed + "件" +
-      "\n完成案の条件不一致: " + d.rejectedFinalConstraints + "件" +
-      "\n棄却（連続/境界/Judge）: " +
-      d.rejectedAdjacent + "/" +
-      d.rejectedBoundary + "/" +
-      d.rejectedJudge +
-      "\nこの画面を撮影して送ってください。"
-    );
-  }
+
 }
 
 
