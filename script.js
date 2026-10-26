@@ -38,6 +38,10 @@ const firebaseStatus = document.getElementById("firebaseStatus");
 const firebaseUserInfo = document.getElementById("firebaseUserInfo");
 const adminLoginButton = document.getElementById("adminLoginButton");
 const adminLogoutButton = document.getElementById("adminLogoutButton");
+const specialRulesModeInputs = document.querySelectorAll('input[name="specialRulesMode"]');
+const specialRuleOptionInputs = document.querySelectorAll('input[name="specialRuleOption"]');
+const specialRulesChoices = document.getElementById("specialRulesChoices");
+const specialRulesValidation = document.getElementById("specialRulesValidation");
 
 const firebaseConfig = {
   apiKey: "AIzaSyCDgc7y6_gOpdXcqiuakwaBpYZPC0euXlI",
@@ -69,6 +73,23 @@ let followerOpponentHistory = {};
 let lastRoundData = null;
 let openParticipantMenuId = null;
 let editingParticipantId = null;
+
+const SPECIAL_RULE_NAMES = [
+  "ワンハンド",
+  "ツーハンド",
+  "ノーハンド",
+  "目隠し",
+  "腰リード",
+  "ハンドカフス",
+  "トラベリング"
+];
+
+// 前回Round生成時の設定を保持する。Round作成前の変更はまだ確定しない。
+let specialRuleSettings = {
+  enabled: false,
+  selected: [...SPECIAL_RULE_NAMES]
+};
+let specialRuleSettingsDirty = false;
 
 
 /* ========================================
@@ -512,6 +533,9 @@ function startEventStateListener() {
             lastRoundData =
               data.lastRoundData || null;
 
+            specialRuleSettings =
+              normalizeSpecialRuleSettings(data.specialRuleSettings);
+
           } else {
             currentRound = 0;
             participantStats = {};
@@ -519,6 +543,12 @@ function startEventStateListener() {
             leaderOpponentHistory = {};
             followerOpponentHistory = {};
             lastRoundData = null;
+            specialRuleSettings = normalizeSpecialRuleSettings(null);
+          }
+
+          // 管理者がRound生成前に編集中の選択は、他の状態更新で戻さない。
+          if (!specialRuleSettingsDirty) {
+            applySpecialRuleSettingsToUI(specialRuleSettings);
           }
 
           eventStateLoaded = true;
@@ -1264,6 +1294,7 @@ async function saveEventState() {
         leaderOpponentHistory: leaderOpponentHistory,
         followerOpponentHistory: followerOpponentHistory,
         lastRoundData: lastRoundData,
+        specialRuleSettings: specialRuleSettings,
 
         updatedAt:
           firebase.firestore
@@ -3541,6 +3572,111 @@ function getTimekeeperFairCount(
 
 
 /* ========================================
+   特殊ルール（Face-to-Face / Pickup共通）
+   ======================================== */
+
+function normalizeSpecialRuleSettings(settings) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  const candidates = Array.isArray(source.selected)
+    ? source.selected
+    : SPECIAL_RULE_NAMES;
+
+  return {
+    enabled: source.enabled === true,
+    selected: SPECIAL_RULE_NAMES.filter(
+      function (rule) {
+        return candidates.includes(rule);
+      }
+    )
+  };
+}
+
+function readSpecialRuleSettingsFromUI() {
+  const enabledInput = document.querySelector(
+    'input[name="specialRulesMode"][value="on"]'
+  );
+
+  return normalizeSpecialRuleSettings({
+    enabled: Boolean(enabledInput && enabledInput.checked),
+    selected: Array.from(specialRuleOptionInputs)
+      .filter(function (input) { return input.checked; })
+      .map(function (input) { return input.value; })
+  });
+}
+
+function applySpecialRuleSettingsToUI(settings) {
+  const normalized = normalizeSpecialRuleSettings(settings);
+
+  specialRulesModeInputs.forEach(function (input) {
+    input.checked = input.value === (normalized.enabled ? "on" : "off");
+  });
+
+  specialRuleOptionInputs.forEach(function (input) {
+    input.checked = normalized.selected.includes(input.value);
+  });
+
+  updateSpecialRulesControls();
+}
+
+function updateSpecialRulesControls() {
+  const settings = readSpecialRuleSettingsFromUI();
+  const missingSelection = settings.enabled && settings.selected.length === 0;
+
+  specialRulesChoices.classList.toggle("hidden", !settings.enabled);
+  specialRulesValidation.classList.toggle("hidden", !missingSelection);
+  // 無選択のまま既存のRound生成に入らないよう、生成ボタンで防ぐ。
+  generateRoundButton.disabled = missingSelection;
+}
+
+// 成功したRound生成のシリアライズ時にのみ確定する。
+// 表示更新やFirebaseの読み直しでは再抽選しない。
+function captureSpecialRuleSettingsForNewRound() {
+  const settings = readSpecialRuleSettingsFromUI();
+  specialRuleSettings = settings;
+  specialRuleSettingsDirty = false;
+  return settings;
+}
+
+function assignSpecialRuleForBattle(settings) {
+  if (!settings.enabled || settings.selected.length === 0) {
+    return null;
+  }
+
+  return getRandomItem(settings.selected);
+}
+
+function addSpecialRuleToStoredBattle(storedBattle, settings) {
+  const rule = assignSpecialRuleForBattle(settings);
+  if (rule !== null) {
+    storedBattle.specialRule = rule;
+  }
+  return storedBattle;
+}
+
+function readSavedSpecialRule(storedBattle) {
+  const rule = storedBattle && storedBattle.specialRule;
+  return SPECIAL_RULE_NAMES.includes(rule) ? rule : null;
+}
+
+function createSpecialRuleElement(rule) {
+  const container = document.createElement("div");
+  container.className = "battle-special-rule";
+
+  const caption = document.createElement("span");
+  caption.className = "battle-special-rule-caption";
+  caption.textContent = "特殊ルール";
+
+  const name = document.createElement("strong");
+  name.className = "battle-special-rule-name";
+  name.textContent = rule;
+
+  container.appendChild(caption);
+  container.appendChild(name);
+  return container;
+}
+
+
+/* ========================================
    Serialize
 ======================================== */
 
@@ -3549,13 +3685,15 @@ function serializeRound(
   waitingParticipants,
   roundNumber
 ) {
+  const roundSpecialRules = captureSpecialRuleSettingsForNewRound();
+
   return {
     roundNumber: roundNumber,
 
     battles:
       battles.map(
         function (battle) {
-          return {
+          return addSpecialRuleToStoredBattle({
             pairA: {
               leaderId:
                 battle.pairA.leader.id,
@@ -3583,7 +3721,7 @@ function serializeRound(
               battle.timekeeper
                 ? battle.timekeeper.id
                 : null
-          };
+          }, roundSpecialRules);
         }
       ),
 
@@ -4581,7 +4719,9 @@ function renderCurrentRound() {
         judges: judges,
 
         timekeeper:
-          timekeeper
+          timekeeper,
+
+        specialRule: readSavedSpecialRule(stored)
       });
     }
   );
@@ -4771,6 +4911,10 @@ function renderRound(
       card.appendChild(
         titleRow
       );
+
+      if (battle.specialRule) {
+        card.appendChild(createSpecialRuleElement(battle.specialRule));
+      }
 
       card.appendChild(
         createPairElement(
@@ -5423,6 +5567,21 @@ adminLogoutButton.addEventListener(
 );
 
 
+specialRulesModeInputs.forEach(function (input) {
+  input.addEventListener("change", function () {
+    specialRuleSettingsDirty = true;
+    updateSpecialRulesControls();
+  });
+});
+
+specialRuleOptionInputs.forEach(function (input) {
+  input.addEventListener("change", function () {
+    specialRuleSettingsDirty = true;
+    updateSpecialRulesControls();
+  });
+});
+
+applySpecialRuleSettingsToUI(specialRuleSettings);
 updateRegistrationParticipationUI();
 
 renderAll();

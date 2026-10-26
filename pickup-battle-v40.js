@@ -3082,6 +3082,8 @@ function serializePickupRoundV40(
   pairCount
 ) {
 
+  const roundSpecialRules = captureSpecialRuleSettingsForNewRound();
+
   return {
 
     format:
@@ -3099,7 +3101,7 @@ function serializePickupRoundV40(
           battle
         ) {
 
-          return {
+          return addSpecialRuleToStoredBattle({
 
             pairs:
               battle.pairs.map(
@@ -3132,7 +3134,7 @@ function serializePickupRoundV40(
               battle.timekeeper
                 ? battle.timekeeper.id
                 : null
-          };
+          }, roundSpecialRules);
         }
       ),
 
@@ -3576,7 +3578,9 @@ function renderPickupCurrentRoundV40() {
           judges,
 
         timekeeper:
-          timekeeper
+          timekeeper,
+
+        specialRule: readSavedSpecialRule(storedBattle)
       });
     }
   );
@@ -3923,6 +3927,9 @@ function renderPickupRoundV40(
         titleRow
       );
 
+      if (battle.specialRule) {
+        card.appendChild(createSpecialRuleElement(battle.specialRule));
+      }
 
       battle.pairs.forEach(
         function (

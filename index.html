@@ -7,7 +7,7 @@
 
   <title>Hustle Battle Generator</title>
 
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=32-specialrules1">
 </head>
 
 <body>
@@ -367,6 +367,40 @@
 
       </div>
 
+
+
+      <div class="special-rules-settings" id="specialRulesSettings">
+
+        <p class="field-label">特殊ルール</p>
+
+        <div class="special-rules-mode" role="group" aria-label="特殊ルールの使用">
+          <label>
+            <input type="radio" name="specialRulesMode" value="off" checked>
+            なし
+          </label>
+          <label>
+            <input type="radio" name="specialRulesMode" value="on">
+            あり
+          </label>
+        </div>
+
+        <div id="specialRulesChoices" class="special-rules-choices hidden">
+          <p class="participation-note">候補を1種類以上選択してください。各Battleに1種類をランダムで割り当てます（重複あり）。</p>
+
+          <div class="special-rules-grid">
+            <label><input type="checkbox" name="specialRuleOption" value="ワンハンド" checked>ワンハンド</label>
+            <label><input type="checkbox" name="specialRuleOption" value="ツーハンド" checked>ツーハンド</label>
+            <label><input type="checkbox" name="specialRuleOption" value="ノーハンド" checked>ノーハンド</label>
+            <label><input type="checkbox" name="specialRuleOption" value="目隠し" checked>目隠し</label>
+            <label><input type="checkbox" name="specialRuleOption" value="腰リード" checked>腰リード</label>
+            <label><input type="checkbox" name="specialRuleOption" value="ハンドカフス" checked>ハンドカフス</label>
+            <label><input type="checkbox" name="specialRuleOption" value="トラベリング" checked>トラベリング</label>
+          </div>
+
+          <p id="specialRulesValidation" class="special-rules-validation hidden" role="status">特殊ルールを1種類以上選択してください。</p>
+        </div>
+
+      </div>
 
       <button
         type="button"
@@ -757,7 +791,7 @@
   <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore-compat.js"></script>
 
-  <script src="script.js?v=34"></script>
+  <script src="script.js?v=34-specialrules1"></script>
 
   <script src="participant-link.js?v=32"></script>
 
@@ -769,7 +803,7 @@
 
   <script src="pair-history-v36.js?v=36"></script>
 
-  <script src="pickup-battle-v40.js?v=40"></script>
+  <script src="pickup-battle-v40.js?v=40-specialrules1"></script>
 
   <script src="pickup-battle-v41.js?v=41-hybrid1-nopopup1"></script>
 
