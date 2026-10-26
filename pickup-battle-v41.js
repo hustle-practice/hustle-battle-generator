@@ -2878,3 +2878,628 @@ function recoverPickupUnpairedScheduleV41(
   }
   return found || schedule;
 }
+
+
+/* ========================================
+   Pickup v41 検証版：限定条件ハイブリッド
+   元の recoverPickupUnpairedScheduleV41 は変更しない。
+   2Pair・固定Role・全アクティブ参加者Judge可能のときだけ
+   未成立Pair優先、続いて再成立1組許容の探索を試す。
+   それ以外は元のv41の結果をそのまま採用する。
+======================================== */
+
+const pickupOriginalRecoveryV41 = recoverPickupUnpairedScheduleV41;
+
+// 限定条件・再成立1組まで許容する探索。元の有効なRoundは常に保持。
+  function searchPickupOneRepeatHybridV41(schedule, danceParticipants, pairCount,
+     previousFinalIds, previousRoundPairKeys, previousWaitingIds, pairMetricCache, limit=10000) {
+    const stats = {states:0, completed:0, options:0, passed:0, skipped:null, ms:0};
+    const start = performance.now();
+    const finish=(value)=>({schedule:value, stats:{...stats,ms:performance.now()-start}});
+    if (!schedule || pairCount!==2 || schedule.length!==5) {stats.skipped='not 2pair 5 battle'; return finish(schedule);}
+    if(danceParticipants.some(p=>p.role==="both"))limit=Math.min(limit,1000);
+    const existingEarly=schedule.reduce((n,b)=>n+b.pairs.filter(p=>getPickupPairMetricV40(p.leader,p.follower,pairMetricCache).existingPair>0).length,0);
+    if(existingEarly<=1){stats.skipped='original repeated <= 1';return finish(schedule);}
+    const scoreStable=(...args)=>{const saved=Math.random;Math.random=()=>0.5;try{return scorePickupScheduleV40(...args)}finally{Math.random=saved}};
+    const score0=scoreStable(schedule, danceParticipants,previousFinalIds,previousRoundPairKeys, previousWaitingIds, pairMetricCache);
+    if(score0.existingPairCount<=1||score0.sameRoundPairRepeats>0) {stats.skipped='original repeated <= 1';return finish(schedule);}
+    const oldJ=schedule.map(b=>getPickupAvailableJudgeCountV41(b));
+  
+    // Judge/TK仮割当による追加安全判定（採用前のみ）。
+    // Copies participants and uses a private RNG to avoid perturbing Round RNG and counters.
+    function dryRunStaffSpread(sch, seed) {
+      const savedParticipants=participants, savedRandom=Math.random;
+      let state=seed>>>0;
+      const seeded=()=>{state ^=state<<13;state ^=state>>>17;state ^=state<<5;return (state>>>0)/4294967296;};
+      participants=savedParticipants.map(p=>({...p}));
+      Math.random=seeded;
+      try {
+        const judgeUsed=new Set();
+        const battles=sch.map(b=>({pairs:b.pairs,judges:[],timekeeper:null}));
+        for(let i=0;i<battles.length;i++) {
+          const avoid=new Set(judgeUsed);
+          if(i===0)for(const id of previousFinalIds)avoid.add(String(id));
+          const judges=selectPickupJudgesV40(battles[i],3,avoid);
+          battles[i].judges=judges;
+          for(const j of judges){j.judgeCount++;j.judgeFairCount=getJudgeFairCount(j)+1;judgeUsed.add(String(j.id));}
+        }
+        const tkUsed=new Set();
+        for(const battle of battles) {
+          const tk=selectPickupTimekeeperV40(battle,tkUsed);
+          if(tk){tk.timekeeperCount=getNumberOrZero(tk.timekeeperCount)+1;
+            tk.timekeeperFairCount=getTimekeeperFairCount(tk)+1;tkUsed.add(String(tk.id));}
+        }
+        const active=participants.filter(p=>p.active!==false);
+        const activeJudges=active.filter(p=>p.judgeAvailable);
+        const spread=(ps,key)=>Math.max(...ps.map(p=>p[key]))-Math.min(...ps.map(p=>p[key]));
+        return {tk:spread(active,'timekeeperFairCount'),judge:spread(activeJudges,'judgeFairCount')};
+      }finally{participants=savedParticipants; Math.random=savedRandom;}
+    }
+    function sameOrBetterStaff(candidate) {
+      stats.staffChecks=(stats.staffChecks||0)+1;
+      if(stats.staffChecks>4)return false;
+      const seeds=[0x12345678,0xABCDEF01,0x09876543];
+      for(const seed of seeds){
+        const before=dryRunStaffSpread(schedule,seed), after=dryRunStaffSpread(candidate,seed);
+        if(after.tk>before.tk || after.judge>before.judge) return false;
+      }
+      return true;
+    }
+  
+    const fresh=[], repeat=[], keys=new Set();
+    for(const l of danceParticipants){if(!canLeadV40(l))continue;
+      for(const f of danceParticipants){if(l.id===f.id||!canFollowV40(f))continue;
+        const metric=getPickupPairMetricV40(l,f,pairMetricCache);
+        if(keys.has(metric.pairKey))continue;
+        keys.add(metric.pairKey);
+        const p={leader:l,follower:f,key:metric.pairKey,repeated:metric.existingPair>0,history:metric.historyCount,
+          ids:[String(l.id),String(f.id)]};
+        (p.repeated?repeat:fresh).push(p);
+      }
+    }
+    if(fresh.length<9){stats.skipped='too few fresh pairs';return finish(schedule);}
+    const options=[];
+    const combined=fresh.concat(repeat);
+    for(let i=0;i<combined.length;i++){
+      for(let j=i+1;j<combined.length;j++){
+        const p=combined[i],q=combined[j],num=p.repeated+q.repeated;
+        if(num>1)continue;
+        if(p.ids.some(id=>q.ids.includes(id)))continue;
+        options.push({pairs:[p,q],keys:[p.key,q.key],ids:[...p.ids,...q.ids],repeats:num, judgeCount:0,idx:options.length});
+      }
+    }
+    for(const o of options){o.judgeCount=getPickupAvailableJudgeCountV41({pairs:o.pairs});}
+    stats.options=options.length;
+    const app=new Map(danceParticipants.map(p=>[String(p.id),0]));
+    const fair=new Map(danceParticipants.map(p=>[String(p.id),getDanceFairCount(p)]));
+    const waiting=new Set([...previousWaitingIds].map(String));
+    const prevFirst=new Set([...previousFinalIds].map(String));
+    const originalMissed=score0.missedParticipants, originalWait=score0.previousWaitingMissed;
+    const targetCover=danceParticipants.length-originalMissed, targetWait=waiting.size-originalWait;
+    const chosen=[],used=new Set();let found=null;
+    function dfs(depth, repeats, prevIds,adj, boundary,covered,waitCovered){
+      if(found||stats.states>=limit||stats.staffChecks>=4) return;
+      const remaining=schedule.length-depth;
+      if(repeats>1||repeats+remaining*2<1 || covered+remaining*4<targetCover || waitCovered+remaining*4<targetWait)return;
+      if(depth===schedule.length){
+        stats.completed++;
+        if(repeats!==1)return;
+        const out=chosen.map(opt=>({pairs:opt.pairs.map(p=>({leader:p.leader,follower:p.follower})),judges:[],timekeeper:null}));
+        const s=scoreStable(out,danceParticipants,previousFinalIds,previousRoundPairKeys,previousWaitingIds,pairMetricCache);
+        const valid=s.previousWaitingMissed<=score0.previousWaitingMissed && s.missedParticipants<=score0.missedParticipants &&
+           s.fairnessSpread<=score0.fairnessSpread && s.fairnessTotalDeviation<=score0.fairnessTotalDeviation+1e-8 &&
+           s.sameRoundPairRepeats<=score0.sameRoundPairRepeats && s.existingPairCount<score0.existingPairCount &&
+           s.boundaryOverlap<=score0.boundaryOverlap && s.adjacentOverlap<=score0.adjacentOverlap &&
+           out.every((b,i)=>getPickupAvailableJudgeCountV41(b)>=oldJ[i]);
+        if(valid && sameOrBetterStaff(out)){found=out;stats.passed++;}
+        return;
+      }
+      // degrees of unused potential Pair per participant (fresh + allowed repeat)
+      const degree=new Map(danceParticipants.map(p=>[String(p.id),0]));
+      for(const p of combined){if(used.has(p.key)||p.repeated&&repeats===1)continue;
+        for(const id of p.ids)degree.set(id,degree.get(id)+1);
+      }
+      let uncoveredNoPartner=0, uncoveredWaitNoPartner=0;
+      for(const [id,n] of app){if(n===0 && degree.get(id)===0){uncoveredNoPartner++;if(waiting.has(id))uncoveredWaitNoPartner++;}}
+      if(uncoveredNoPartner>originalMissed || uncoveredWaitNoPartner>originalWait) return;
+      const next=[];
+      for(const o of options){
+        if(repeats+o.repeats>1 || o.judgeCount<oldJ[depth] || o.keys.some(k=>used.has(k)))continue;
+        let nAdj=adj, nBound=boundary, freshD=0,freshWait=0, scarcity=0, fairCost=0;
+        if(prevIds){for(const id of o.ids)if(prevIds.has(id))nAdj++;}
+        if(nAdj>score0.adjacentOverlap)continue;
+        if(depth===0){for(const id of o.ids)if(prevFirst.has(id))nBound++;}
+        if(nBound>score0.boundaryOverlap)continue;
+        for(const id of o.ids){
+          const ap=app.get(id);
+          if(!ap){freshD++;if(waiting.has(id))freshWait++;const deg=degree.get(id);if(deg>0)scarcity+=1000/deg;}
+          fairCost+=fair.get(id)+ap;
+        }
+        if(covered+freshD+(remaining-1)*4<targetCover || waitCovered+freshWait+(remaining-1)*4<targetWait)continue;
+        next.push({o,nAdj,nBound,freshD,freshWait,scarcity,fairCost, index:o.idx});
+      }
+      next.sort((a,b)=>b.freshWait-a.freshWait||b.freshD-a.freshD||b.scarcity-a.scarcity||a.fairCost-b.fairCost||
+         a.o.repeats-b.o.repeats||a.nAdj-b.nAdj||a.index-b.index);
+      for(const ent of next){
+        if(stats.states>=limit||found||stats.staffChecks>=4)break;
+        stats.states++;
+        const o=ent.o;
+        o.keys.forEach(k=>used.add(k));o.ids.forEach(id=>app.set(id,app.get(id)+1));chosen.push(o);
+        dfs(depth+1,repeats+o.repeats,new Set(o.ids),ent.nAdj,ent.nBound,covered+ent.freshD,waitCovered+ent.freshWait);
+        chosen.pop();o.ids.forEach(id=>app.set(id,app.get(id)-1));o.keys.forEach(k=>used.delete(k));
+      }
+    }
+    dfs(0,0,null,0,0,0,0);
+    return finish(found||schedule);
+  }
+
+function searchPickupScarcityHybridV41(
+  schedule,
+  danceParticipants,
+  pairCount,
+  previousFinalIds,
+  previousRoundPairKeys,
+  previousWaitingIds,
+  pairMetricCache
+) {
+  // 実行のたびにリセット。旧診断結果が残らないようにする。
+  pickupRecoveryDiagnosticV41 = {
+    reason: "未実行",
+    repeatedBefore: 0,
+    repeatedAfter: 0,
+    sameRoundAfter: 0,
+    freshCount: 0,
+    needed: 0,
+    options: 0,
+    states: 0,
+    rejectedAdjacent: 0,
+    rejectedBoundary: 0,
+    rejectedJudge: 0,
+    completed: 0,
+    rejectedFinalConstraints: 0
+  };
+  const diagnosis = pickupRecoveryDiagnosticV41;
+
+  if (!schedule || schedule.length === 0) {
+    diagnosis.reason = "生成データなし";
+    return schedule;
+  }
+
+  const original = scorePickupScheduleV40(
+    schedule,
+    danceParticipants,
+    previousFinalIds,
+    previousRoundPairKeys,
+    previousWaitingIds,
+    pairMetricCache
+  );
+
+  diagnosis.repeatedBefore = original.existingPairCount;
+  diagnosis.repeatedAfter = original.existingPairCount;
+  diagnosis.sameRoundAfter = original.sameRoundPairRepeats;
+
+  if (original.existingPairCount === 0 &&
+      original.sameRoundPairRepeats === 0) {
+    diagnosis.reason = "再成立なし";
+    return schedule;
+  }
+
+  const needed = schedule.length * pairCount;
+  diagnosis.needed = needed;
+  const freshPairs = [];
+
+  danceParticipants.forEach(leader => {
+    if (!canLeadV40(leader)) return;
+    danceParticipants.forEach(follower => {
+      if (!canFollowV40(follower) ||
+          String(leader.id) === String(follower.id)) return;
+      const metric = getPickupPairMetricV40(
+        leader, follower, pairMetricCache
+      );
+      if (metric.existingPair === 0) {
+        freshPairs.push({leader, follower});
+      }
+    });
+  });
+
+  // 多数の未成立Pairが残る段階は既存Beam Searchを優先。
+  // 終盤の選択肢が少ない場合だけ、探索範囲を限定して検証する。
+  const MAX_FRESH = pairCount <= 2 ? 24 : 18;
+  diagnosis.freshCount = freshPairs.length;
+  if (freshPairs.length < needed) {
+    diagnosis.reason = "未成立Pairが必要数より少ない";
+    return schedule;
+  }
+  if (freshPairs.length > MAX_FRESH) {
+    diagnosis.reason = "未成立Pair多数のため再探索対象外";
+    return schedule;
+  }
+
+  const originalJudgeCounts = schedule.map(
+    battle => getPickupAvailableJudgeCountV41(battle)
+  );
+
+  const options = [];
+  const OPTION_LIMIT = 1200;
+
+  function buildBattleOptions(from, chosen, ids, edgeBits) {
+    if (options.length >= OPTION_LIMIT) return;
+    if (chosen.length === pairCount) {
+      options.push({
+        pairs: chosen.slice(),
+        ids: new Set(ids),
+        edgeBits
+      });
+      return;
+    }
+    for (let i = from; i < freshPairs.length; i++) {
+      const pair = freshPairs[i];
+      const lid = String(pair.leader.id);
+      const fid = String(pair.follower.id);
+      if (ids.has(lid) || ids.has(fid)) continue;
+      ids.add(lid);
+      ids.add(fid);
+      chosen.push(pair);
+      buildBattleOptions(i + 1, chosen, ids, edgeBits | (1 << i));
+      chosen.pop();
+      ids.delete(lid);
+      ids.delete(fid);
+      if (options.length >= OPTION_LIMIT) break;
+    }
+  }
+
+  buildBattleOptions(0, [], new Set(), 0);
+  diagnosis.options = options.length;
+  if (!options.length) {
+    diagnosis.reason = "Battle候補を作成できない";
+    return schedule;
+  }
+
+  const MAX_STATES = 25000;
+  let states = 0;
+  let found = null;
+  const partial = [];
+
+  function search(battleIndex, usedEdges, previousIds, adjacentCount, boundaryCount) {
+    if (found || states >= MAX_STATES) return;
+    if (battleIndex === schedule.length) {
+      diagnosis.completed++;
+      const candidate = partial.map(option => ({
+        pairs: option.pairs.map(pair => ({
+          leader: pair.leader,
+          follower: pair.follower
+        })),
+        judges: [],
+        timekeeper: null
+      }));
+
+      const result = scorePickupScheduleV40(
+        candidate,
+        danceParticipants,
+        previousFinalIds,
+        previousRoundPairKeys,
+        previousWaitingIds,
+        pairMetricCache
+      );
+
+      if (result.previousWaitingMissed > original.previousWaitingMissed ||
+          result.missedParticipants > original.missedParticipants ||
+          result.fairnessSpread > original.fairnessSpread ||
+          result.sameRoundPairRepeats > original.sameRoundPairRepeats ||
+          result.existingPairCount >= original.existingPairCount ||
+          result.boundaryOverlap > original.boundaryOverlap ||
+          result.adjacentOverlap > original.adjacentOverlap) {
+        diagnosis.rejectedFinalConstraints++;
+        return;
+      }
+
+      for (let i = 0; i < candidate.length; i++) {
+        if (getPickupAvailableJudgeCountV41(candidate[i]) <
+            originalJudgeCounts[i]) return;
+      }
+
+      found = candidate;
+      return;
+    }
+
+    for (const option of options) {
+      if (++states > MAX_STATES) return;
+      if ((usedEdges & option.edgeBits) !== 0) continue;
+
+      let nextAdjacent = adjacentCount;
+      if (previousIds) {
+        for (const id of option.ids) {
+          if (previousIds.has(id)) nextAdjacent++;
+        }
+      }
+      if (nextAdjacent > original.adjacentOverlap) {
+        diagnosis.rejectedAdjacent++;
+        continue;
+      }
+
+      let nextBoundary = boundaryCount;
+      if (battleIndex === 0) {
+        for (const id of option.ids) {
+          if (previousFinalIds.has(id)) nextBoundary++;
+        }
+      }
+      if (nextBoundary > original.boundaryOverlap) {
+        diagnosis.rejectedBoundary++;
+        continue;
+      }
+
+      const preview = {pairs: option.pairs};
+      if (getPickupAvailableJudgeCountV41(preview) <
+          originalJudgeCounts[battleIndex]) {
+        diagnosis.rejectedJudge++;
+        continue;
+      }
+
+      partial.push(option);
+      search(
+        battleIndex + 1,
+        usedEdges | option.edgeBits,
+        option.ids,
+        nextAdjacent,
+        nextBoundary
+      );
+      partial.pop();
+      if (found || states >= MAX_STATES) return;
+    }
+  }
+
+  search(0, 0, null, 0, 0);
+  diagnosis.states = states;
+
+  // 2Pairだけ：従来探索が失敗した場合に限り、動的な順序で追加探索する。
+  // 元のRoundは保持し、全制約を満たす改善案以外を採用しない。
+  diagnosis.extraStates = 0;
+  diagnosis.extraCompleted = 0;
+  if (!found && pairCount === 2) {
+    const EXTRA_STATE_LIMIT = 5000;
+    const appearance = new Map(
+      danceParticipants.map(person => [String(person.id), 0])
+    );
+    const fairBase = new Map(
+      danceParticipants.map(person => [
+        String(person.id), getDanceFairCount(person)
+      ])
+    );
+    const eligibleJudgeCounts = options.map(option =>
+      getPickupAvailableJudgeCountV41({pairs: option.pairs})
+    );
+    const waitingIds = new Set(
+      [...previousWaitingIds].map(id => String(id))
+    );
+    const originalMissedLimit = original.missedParticipants;
+    const originalWaitingLimit = original.previousWaitingMissed;
+    const additionalPartial = [];
+    let extraStates = 0;
+    let extraCompleted = 0;
+
+    function dynamicSearch(depth, usedEdges, previousIds, adjacent, boundary,
+                           covered, waitingCovered) {
+      if (found || extraStates >= EXTRA_STATE_LIMIT) return;
+
+      const remainingSlots = (schedule.length - depth) * pairCount * 2;
+      const totalWaiting = danceParticipants.filter(person =>
+        waitingIds.has(String(person.id))
+      ).length;
+      if (covered + remainingSlots < danceParticipants.length - originalMissedLimit ||
+          waitingCovered + remainingSlots < totalWaiting - originalWaitingLimit) {
+        return;
+      }
+
+      if (depth === schedule.length) {
+        extraCompleted++;
+        const candidate = additionalPartial.map(option => ({
+          pairs: option.pairs.map(pair => ({
+            leader: pair.leader,
+            follower: pair.follower
+          })),
+          judges: [],
+          timekeeper: null
+        }));
+        const score = scorePickupScheduleV40(
+          candidate, danceParticipants, previousFinalIds,
+          previousRoundPairKeys, previousWaitingIds, pairMetricCache
+        );
+        if (score.previousWaitingMissed <= original.previousWaitingMissed &&
+            score.missedParticipants <= original.missedParticipants &&
+            score.fairnessSpread <= original.fairnessSpread &&
+            score.fairnessTotalDeviation <= original.fairnessTotalDeviation + 1e-8 &&
+            score.sameRoundPairRepeats === 0 &&
+            score.existingPairCount < original.existingPairCount &&
+            score.boundaryOverlap <= original.boundaryOverlap &&
+            score.adjacentOverlap <= original.adjacentOverlap) {
+          found = candidate;
+        }
+        return;
+      }
+
+      // 未使用の未成立Pairに接続している人数を調べる。
+      // これ以上一度も出場できない人が、元案の未出場人数を超える枝は除外する。
+      // Judge / 連続Danceを無視した楽観的な判定なので、安全な必要条件のみ扱う。
+      const remainingDegrees = new Map(
+        danceParticipants.map(person => [String(person.id), 0])
+      );
+      for (let edgeIndex = 0; edgeIndex < freshPairs.length; edgeIndex++) {
+        if ((usedEdges & (1 << edgeIndex)) !== 0) continue;
+        const available = freshPairs[edgeIndex];
+        const leaderId = String(available.leader.id);
+        const followerId = String(available.follower.id);
+        remainingDegrees.set(leaderId, remainingDegrees.get(leaderId) + 1);
+        remainingDegrees.set(followerId, remainingDegrees.get(followerId) + 1);
+      }
+      let isolatedUncovered = 0;
+      let isolatedWaiting = 0;
+      for (const person of danceParticipants) {
+        const id = String(person.id);
+        if (appearance.get(id) !== 0 || remainingDegrees.get(id) > 0) continue;
+        isolatedUncovered++;
+        if (waitingIds.has(id)) isolatedWaiting++;
+      }
+      if (isolatedUncovered > originalMissedLimit ||
+          isolatedWaiting > originalWaitingLimit) {
+        diagnosis.extraImpossibleBranches =
+          (diagnosis.extraImpossibleBranches || 0) + 1;
+        return;
+      }
+
+      const nextOptions = [];
+      for (let index = 0; index < options.length; index++) {
+        const option = options[index];
+        if ((usedEdges & option.edgeBits) !== 0 ||
+            eligibleJudgeCounts[index] < originalJudgeCounts[depth]) {
+          continue;
+        }
+        let nextAdjacent = adjacent;
+        if (previousIds) {
+          for (const id of option.ids) {
+            if (previousIds.has(id)) nextAdjacent++;
+          }
+        }
+        if (nextAdjacent > original.adjacentOverlap) continue;
+
+        let nextBoundary = boundary;
+        if (depth === 0) {
+          for (const id of option.ids) {
+            if (previousFinalIds.has(id)) nextBoundary++;
+          }
+        }
+        if (nextBoundary > original.boundaryOverlap) continue;
+
+        let freshWaiting = 0;
+        let freshDancers = 0;
+        let fairnessPriority = 0;
+        for (const id of option.ids) {
+          const count = appearance.get(id);
+          if (count === 0) {
+            freshDancers++;
+            if (waitingIds.has(id)) freshWaiting++;
+          }
+          fairnessPriority += (fairBase.get(id) || 0) + count;
+        }
+        let scarcityPriority = 0;
+        for (const id of option.ids) {
+          const degree = remainingDegrees.get(id);
+          if (appearance.get(id) === 0 && degree > 0) {
+            scarcityPriority += 1000 / degree;
+          }
+        }
+        nextOptions.push({
+          option,
+          freshWaiting,
+          freshDancers,
+          scarcityPriority,
+          fairnessPriority,
+          nextAdjacent,
+          nextBoundary,
+          judgeMargin: eligibleJudgeCounts[index] - originalJudgeCounts[depth],
+          index
+        });
+      }
+
+      // 毎Battleの残り出場枠に応じて再評価。ランダムな並べ替えは行わない。
+      nextOptions.sort((a, b) =>
+        (b.freshWaiting - a.freshWaiting) ||
+        (b.freshDancers - a.freshDancers) ||
+        (b.scarcityPriority - a.scarcityPriority) ||
+        (a.fairnessPriority - b.fairnessPriority) ||
+        (a.nextAdjacent - b.nextAdjacent) ||
+        (a.nextBoundary - b.nextBoundary) ||
+        (b.judgeMargin - a.judgeMargin) ||
+        (a.index - b.index)
+      );
+
+      for (const entry of nextOptions) {
+        if (++extraStates > EXTRA_STATE_LIMIT) break;
+        const option = entry.option;
+        for (const id of option.ids) {
+          appearance.set(id, appearance.get(id) + 1);
+        }
+        additionalPartial.push(option);
+        dynamicSearch(
+          depth + 1,
+          usedEdges | option.edgeBits,
+          option.ids,
+          entry.nextAdjacent,
+          entry.nextBoundary,
+          covered + entry.freshDancers,
+          waitingCovered + entry.freshWaiting
+        );
+        additionalPartial.pop();
+        for (const id of option.ids) {
+          appearance.set(id, appearance.get(id) - 1);
+        }
+        if (found || extraStates >= EXTRA_STATE_LIMIT) break;
+      }
+    }
+
+    dynamicSearch(0, 0, null, 0, 0, 0, 0);
+    diagnosis.extraStates = extraStates;
+    diagnosis.extraCompleted = extraCompleted;
+  }
+  if (found) {
+    diagnosis.repeatedAfter = 0;
+    diagnosis.sameRoundAfter = 0;
+    diagnosis.reason = diagnosis.extraStates > 0
+      ? "動的追加探索で未成立Pairのみの組み直し成功"
+      : "未成立Pairのみで組み直し成功";
+  } else if (states >= MAX_STATES) {
+    diagnosis.reason = diagnosis.extraStates > 0
+      ? "探索25,000回＋動的追加探索で改善なし"
+      : "探索25,000回の上限に到達";
+  } else if (options.length >= OPTION_LIMIT) {
+    diagnosis.reason = "Battle候補1,200件の上限に到達";
+  } else {
+    diagnosis.reason = "探索範囲内では条件に合う案なし";
+  }
+  return found || schedule;
+}
+
+// 通常生成／v40の保存・表示・Judge/TKには手を加えず、再探索だけ切り替える。
+recoverPickupUnpairedScheduleV41 = function pickupHybridRecoveryV41(
+  schedule,
+  danceParticipants,
+  pairCount,
+  previousFinalIds,
+  previousRoundPairKeys,
+  previousWaitingIds,
+  pairMetricCache
+) {
+  const args = [schedule, danceParticipants, pairCount, previousFinalIds,
+    previousRoundPairKeys, previousWaitingIds, pairMetricCache];
+  const eligible = pairCount === 2 &&
+    Array.isArray(danceParticipants) &&
+    danceParticipants.every(person =>
+      person.role === "leader" || person.role === "follower") &&
+    participants.filter(person => person.active !== false)
+      .every(person => person.judgeAvailable === true);
+
+  if (!eligible) {
+    return pickupOriginalRecoveryV41(...args);
+  }
+
+  try {
+    const zeroFirst = searchPickupScarcityHybridV41(...args);
+    const result = searchPickupOneRepeatHybridV41(
+      zeroFirst, danceParticipants, pairCount, previousFinalIds,
+      previousRoundPairKeys, previousWaitingIds, pairMetricCache, 10000
+    );
+    if (result.stats.passed > 0) {
+      pickupRecoveryDiagnosticV41.repeatedAfter = 1;
+      pickupRecoveryDiagnosticV41.sameRoundAfter = 0;
+      pickupRecoveryDiagnosticV41.reason = "限定条件：再成立1組への改善成功";
+      pickupRecoveryDiagnosticV41.oneRepeatStates = result.stats.states;
+    }
+    return result.schedule;
+  } catch (error) {
+    // 追加探索で例外が起きても元の有効なRoundを壊さない。
+    console.error("Pickup追加探索を中断し、元のRoundを維持します。", error);
+    if (pickupRecoveryDiagnosticV41) {
+      pickupRecoveryDiagnosticV41.reason = "追加探索エラー：元のRoundを維持";
+    }
+    return schedule;
+  }
+};
